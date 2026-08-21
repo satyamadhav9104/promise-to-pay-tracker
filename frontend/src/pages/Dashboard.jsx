@@ -97,19 +97,8 @@ export default function Dashboard() {
             <PlusCircle className="w-4 h-4" />
             Add Invoice
           </button>
-          <button
-            onClick={handleRunTick}
-            disabled={tickLoading}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-indigo-200 transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
-          >
-            {tickLoading ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4 fill-current" />
-            )}
-            Run Scheduler Tick Engine
-          </button>
         </div>
+
 
 
       </div>

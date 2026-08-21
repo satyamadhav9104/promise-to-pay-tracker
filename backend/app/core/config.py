@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_provider: str = "anthropic"  # anthropic | gemini
 
+    # Free Email (Gmail SMTP / Custom SMTP) configuration
+    smtp_server: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str = ""  # Your Gmail address: e.g. user@gmail.com
+    smtp_password: str = ""  # Gmail App Password (16 chars)
+    sender_email: str = ""   # e.g. user@gmail.com
+
     # Escalation rules (see FR16-FR18 in requirements)
     max_touches_per_invoice: int = 3
     cooldown_days_between_touches: int = 4

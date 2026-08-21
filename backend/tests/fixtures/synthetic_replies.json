@@ -1,0 +1,122 @@
+[
+  {
+    "id": "reply_01",
+    "text": "Hi team, we will process payment for invoice INV-1001 by 2026-09-01.",
+    "expected_category": "explicit_date_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_min_confidence": 0.85
+  },
+  {
+    "id": "reply_02",
+    "text": "Sorry for the delay! We will transfer the funds tomorrow morning.",
+    "expected_category": "relative_date_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_min_confidence": 0.85
+  },
+  {
+    "id": "reply_03",
+    "text": "I already paid this invoice yesterday via Razorpay UPI. Reference ID #RP192837.",
+    "expected_category": "payment_claim",
+    "expected_is_promise": false,
+    "expected_is_claim": true,
+    "expected_min_confidence": 0.90
+  },
+  {
+    "id": "reply_04",
+    "text": "Payment has already been completed this morning. Please check your bank account.",
+    "expected_category": "payment_claim",
+    "expected_is_promise": false,
+    "expected_is_claim": true,
+    "expected_min_confidence": 0.90
+  },
+  {
+    "id": "reply_05",
+    "text": "We are currently reviewing our cash flow and will try to pay soon.",
+    "expected_category": "vague_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_max_confidence": 0.65
+  },
+  {
+    "id": "reply_06",
+    "text": "Working on it, will clear the dues shortly.",
+    "expected_category": "vague_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_max_confidence": 0.65
+  },
+  {
+    "id": "reply_07",
+    "text": "We dispute the amount on this invoice. The deliverables were incomplete.",
+    "expected_category": "dispute",
+    "expected_is_promise": false,
+    "expected_is_claim": false,
+    "expected_min_confidence": 0.80
+  },
+  {
+    "id": "reply_08",
+    "text": "Payment will be sent by next Monday.",
+    "expected_category": "relative_date_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_min_confidence": 0.80
+  },
+  {
+    "id": "reply_09",
+    "text": "Our accounts team confirmed wire transfer scheduled for 2026-08-30.",
+    "expected_category": "explicit_date_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_min_confidence": 0.85
+  },
+  {
+    "id": "reply_10",
+    "text": "Transferred full amount today.",
+    "expected_category": "payment_claim",
+    "expected_is_promise": false,
+    "expected_is_claim": true,
+    "expected_min_confidence": 0.90
+  },
+  {
+    "id": "reply_11",
+    "text": "Can you resend the invoice copy? We lost it.",
+    "expected_category": "inquiry",
+    "expected_is_promise": false,
+    "expected_is_claim": false,
+    "expected_max_confidence": 0.40
+  },
+  {
+    "id": "reply_12",
+    "text": "Will pay by end of week.",
+    "expected_category": "relative_date_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_min_confidence": 0.80
+  },
+  {
+    "id": "reply_13",
+    "text": "I paid via NEFT 2 hours ago. Transaction ID N1920384729.",
+    "expected_category": "payment_claim",
+    "expected_is_promise": false,
+    "expected_is_claim": true,
+    "expected_min_confidence": 0.90
+  },
+  {
+    "id": "reply_14",
+    "text": "We will clear this invoice by Friday.",
+    "expected_category": "relative_date_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_min_confidence": 0.80
+  },
+  {
+    "id": "reply_15",
+    "text": "Sometime next month maybe, money is tight right now.",
+    "expected_category": "vague_promise",
+    "expected_is_promise": true,
+    "expected_is_claim": false,
+    "expected_max_confidence": 0.65
+  }
+]

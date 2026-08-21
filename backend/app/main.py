@@ -42,3 +42,23 @@ def root():
         "status": "online",
         "docs": "/docs"
     }
+
+
+@app.get("/health")
+def health_check():
+    """Production health check endpoint for ECS, Cloud Run, Render, and Docker health checks."""
+    try:
+        from app.db.session import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        db_status = "healthy"
+    except Exception as e:
+        db_status = f"unhealthy: {str(e)}"
+
+    return {
+        "status": "ok" if db_status == "healthy" else "degraded",
+        "database": db_status,
+        "version": "1.0.0"
+    }
+

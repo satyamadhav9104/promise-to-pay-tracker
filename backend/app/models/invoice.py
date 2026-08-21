@@ -3,6 +3,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import Column, String, Float, DateTime, Enum as SAEnum, Integer
+from sqlalchemy.orm import relationship
 from app.db.base import Base
 
 
@@ -27,5 +28,8 @@ class Invoice(Base):
     due_date = Column(DateTime, nullable=False)
     created_date = Column(DateTime, default=datetime.utcnow)
     status = Column(SAEnum(InvoiceStatus), default=InvoiceStatus.CREATED, nullable=False)
-    touch_count = Column(Integer, default=0)
+    touch_count = Column(Integer, default=0, nullable=False)
     last_touch_at = Column(DateTime, nullable=True)
+
+    promises = relationship("Promise", back_populates="invoice", cascade="all, delete-orphan")
+    action_logs = relationship("ActionLog", back_populates="invoice", cascade="all, delete-orphan")

@@ -22,8 +22,8 @@ class InvoiceStatus(str, enum.Enum):
 class Invoice(Base):
     __tablename__ = "invoices"
 
-    id = Column(String, primary_key=True)
-    customer_name = Column(String, nullable=False)
+    id = Column(String(64), primary_key=True)
+    customer_name = Column(String(255), nullable=False)
     amount = Column(Float, nullable=False)
     due_date = Column(DateTime, nullable=False)
     created_date = Column(DateTime, default=datetime.utcnow)

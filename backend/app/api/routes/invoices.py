@@ -9,9 +9,48 @@ from app.db.session import get_db
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.promise import Promise, PromiseStatus
 from app.models.action_log import ActionLog
-from app.schemas.invoice import InvoiceResponse, MetricsResponse
+from app.schemas.invoice import InvoiceResponse, MetricsResponse, InvoiceCreate
+import uuid
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
+
+
+@router.post("", response_model=InvoiceResponse, status_code=201)
+def create_invoice(invoice_in: InvoiceCreate, db: Session = Depends(get_db)):
+    """Creates a new B2B invoice in the database."""
+    existing = db.query(Invoice).filter(Invoice.id == invoice_in.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Invoice with ID '{invoice_in.id}' already exists.")
+
+    now = datetime.utcnow()
+    status = InvoiceStatus.OVERDUE if invoice_in.due_date < now else InvoiceStatus.CREATED
+
+    invoice = Invoice(
+        id=invoice_in.id,
+        customer_name=invoice_in.customer_name,
+        amount=invoice_in.amount,
+        due_date=invoice_in.due_date,
+        created_date=now,
+        status=status,
+        touch_count=0,
+        last_touch_at=None
+    )
+    db.add(invoice)
+
+    log_entry = ActionLog(
+        id=str(uuid.uuid4()),
+        invoice_id=invoice.id,
+        timestamp=now,
+        trigger="manual_invoice_creation",
+        action_taken="invoice_created",
+        rule_applied="initial_ingestion",
+        actor="user",
+        detail=f"Created invoice {invoice.id} for {invoice.customer_name} (${invoice.amount:,.2f}). Status: {status.value}."
+    )
+    db.add(log_entry)
+    db.commit()
+    db.refresh(invoice)
+    return invoice
 
 
 @router.get("", response_model=List[InvoiceResponse])
@@ -26,6 +65,7 @@ def list_invoices(
     if status:
         query = query.filter(Invoice.status == status)
     return query.order_by(Invoice.due_date.asc()).offset(offset).limit(limit).all()
+
 
 
 @router.get("/metrics/summary", response_model=MetricsResponse)

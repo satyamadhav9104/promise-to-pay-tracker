@@ -25,8 +25,14 @@ class Settings(BaseSettings):
     cooldown_days_between_touches: int = 4
     promise_confidence_threshold: float = 0.7
 
+    # Clerk Authentication
+    clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
+    clerk_issuer: str = ""
+
     class Config:
         env_file = ".env"
 
 
 settings = Settings()
+

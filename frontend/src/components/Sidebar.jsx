@@ -5,8 +5,10 @@ import {
   Activity,
   BarChart3,
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  User
 } from 'lucide-react';
+import { UserButton, useUser } from '@clerk/clerk-react';
 
 export default function Sidebar({ activeTab, setActiveTab }) {
   const navItems = [
@@ -16,6 +18,15 @@ export default function Sidebar({ activeTab, setActiveTab }) {
     { id: 'metrics', label: 'Recovery Metrics', icon: BarChart3 },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
+
+  // Clerk hook to access user metadata safely
+  let user = null;
+  try {
+    const clerkUserObj = useUser();
+    user = clerkUserObj?.user;
+  } catch (e) {
+    // Graceful fallback if ClerkProvider is not present
+  }
 
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex-col hidden sm:flex z-20 shadow-sm relative">
@@ -63,16 +74,28 @@ export default function Sidebar({ activeTab, setActiveTab }) {
           <p className="text-[11px] text-indigo-700 leading-tight">AI Revenue Recovery Agent v1.0.0</p>
         </div>
 
-        <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity pt-1">
-          <div className="w-10 h-10 rounded-full bg-indigo-100 border border-indigo-200 overflow-hidden flex items-center justify-center text-indigo-700 font-bold text-sm">
-            SD
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-gray-800">Collections Admin</span>
-            <span className="text-xs text-gray-500">Razorpay AI Buildathon</span>
+        {/* User Account / Profile Section */}
+        <div className="flex items-center justify-between p-2 bg-white rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            {user ? (
+              <UserButton afterSignOutUrl="/" />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold text-xs">
+                <User className="w-4 h-4" />
+              </div>
+            )}
+            <div className="flex flex-col truncate">
+              <span className="text-xs font-semibold text-gray-800 truncate">
+                {user ? user.fullName || user.primaryEmailAddress?.emailAddress || 'User' : 'Collections Admin'}
+              </span>
+              <span className="text-[10px] text-gray-500 truncate">
+                {user ? user.primaryEmailAddress?.emailAddress : 'Authenticated'}
+              </span>
+            </div>
           </div>
         </div>
       </div>
     </aside>
   );
 }
+

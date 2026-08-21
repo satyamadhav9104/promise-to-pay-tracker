@@ -60,14 +60,8 @@ export default function InvoicesPage() {
             <PlusCircle className="w-4 h-4" />
             Add Invoice
           </button>
-          <button
-            onClick={loadInvoices}
-            className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm flex items-center gap-2 text-sm font-medium"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh List
-          </button>
         </div>
+
       </div>
 
 

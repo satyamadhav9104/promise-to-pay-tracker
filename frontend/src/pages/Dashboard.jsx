@@ -98,13 +98,6 @@ export default function Dashboard() {
             Add Invoice
           </button>
           <button
-            onClick={loadData}
-            className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm"
-            title="Refresh Data"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-          <button
             onClick={handleRunTick}
             disabled={tickLoading}
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-indigo-200 transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
@@ -117,6 +110,7 @@ export default function Dashboard() {
             Run Scheduler Tick Engine
           </button>
         </div>
+
 
       </div>
 

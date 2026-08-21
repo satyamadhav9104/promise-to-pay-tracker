@@ -1,6 +1,6 @@
 """
 Notifier service.
-Sends outbound communications via Email (real Gmail SMTP or simulated) and WhatsApp (simulated).
+Sends outbound communications via Email (Resend API, real Gmail SMTP, or simulated) and WhatsApp (simulated).
 Per FR20, WhatsApp operations are explicitly simulated and logged.
 """
 import smtplib
@@ -13,6 +13,30 @@ from app.core.config import settings
 from app.core.rules import Channel
 
 logger = logging.getLogger(__name__)
+
+
+def _send_resend_email(to_email: str, subject: str, body: str) -> bool:
+    """Sends a real email using Resend free API (3,000 free emails/month)."""
+    if not settings.resend_api_key:
+        return False
+
+    try:
+        import resend
+        resend.api_key = settings.resend_api_key
+
+        sender = settings.sender_email or "onboarding@resend.dev"
+        params = {
+            "from": sender,
+            "to": [to_email],
+            "subject": subject,
+            "text": body,
+        }
+        email_res = resend.Emails.send(params)
+        logger.info(f"[RESEND EMAIL SENT] To: {to_email} | ID: {email_res.get('id')}")
+        return True
+    except Exception as e:
+        logger.error(f"[RESEND EMAIL FAILED] Error: {e}")
+        return False
 
 
 def _send_real_smtp_email(to_email: str, subject: str, body: str) -> bool:
@@ -51,7 +75,7 @@ def send_notification(
 ) -> dict:
     """
     Sends an outbound touch (Email or WhatsApp).
-    If SMTP credentials are standard, dispatches a real email. Otherwise logs simulated delivery.
+    Dispatches via Resend API or SMTP if configured. Otherwise logs simulated delivery.
     """
     to_email = recipient_email or f"{customer_name.lower().replace(' ', '.')}@example.com"
 
@@ -73,29 +97,45 @@ def send_notification(
                 f"Sincerely,\nFinance & Accounts Department"
             )
 
-        real_sent = _send_real_smtp_email(to_email, subject, body)
-
-        if real_sent:
+        # Try Resend API first, then SMTP
+        resend_sent = _send_resend_email(to_email, subject, body)
+        if resend_sent:
             return {
                 "channel": "email",
                 "touch_number": touch_number,
                 "simulated": False,
+                "provider": "resend",
+                "recipient": to_email,
+                "subject": subject,
+                "body": body,
+                "status": "sent_via_resend"
+            }
+
+        smtp_sent = _send_real_smtp_email(to_email, subject, body)
+        if smtp_sent:
+            return {
+                "channel": "email",
+                "touch_number": touch_number,
+                "simulated": False,
+                "provider": "smtp",
                 "recipient": to_email,
                 "subject": subject,
                 "body": body,
                 "status": "sent_via_smtp"
             }
-        else:
-            logger.info(f"[SIMULATED EMAIL] To: {customer_name} ({to_email}) | Subject: {subject}")
-            return {
-                "channel": "email",
-                "touch_number": touch_number,
-                "simulated": True,
-                "recipient": to_email,
-                "subject": subject,
-                "body": body,
-                "status": "delivered_simulated"
-            }
+
+        # Fallback to simulated delivery
+        logger.info(f"[SIMULATED EMAIL] To: {customer_name} ({to_email}) | Subject: {subject}")
+        return {
+            "channel": "email",
+            "touch_number": touch_number,
+            "simulated": True,
+            "provider": "simulated",
+            "recipient": to_email,
+            "subject": subject,
+            "body": body,
+            "status": "delivered_simulated"
+        }
 
     elif channel == Channel.WHATSAPP:
         message = f"[SIMULATED WHATSAPP] Hi {customer_name}, your invoice for ${amount:,.2f} requires immediate attention. Final notice prior to human account escalation."
@@ -104,6 +144,7 @@ def send_notification(
             "channel": "whatsapp",
             "touch_number": touch_number,
             "simulated": True,
+            "provider": "simulated",
             "body": message,
             "status": "delivered_simulated"
         }

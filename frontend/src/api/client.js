@@ -74,3 +74,18 @@ export async function simulatePayment(invoiceId) {
   return res.json();
 }
 
+export async function createInvoice(invoiceData) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/invoices`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(invoiceData)
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Failed to create invoice');
+  }
+  return res.json();
+}
+
+

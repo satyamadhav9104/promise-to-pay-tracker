@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, RefreshCw, FileText, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Search, Filter, RefreshCw, FileText, CheckCircle, Clock, AlertCircle, PlusCircle } from 'lucide-react';
 import { fetchInvoices, simulatePayment } from '../api/client';
 import InvoiceList from '../components/InvoiceList';
+import CreateInvoiceModal from '../components/CreateInvoiceModal';
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState([]);
@@ -9,6 +10,7 @@ export default function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const loadInvoices = async () => {
     try {
@@ -50,14 +52,24 @@ export default function InvoicesPage() {
           <p className="text-gray-500 mt-1">Manage and track all B2B receivables across the recovery lifecycle.</p>
         </div>
 
-        <button
-          onClick={loadInvoices}
-          className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm flex items-center gap-2 text-sm font-medium"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh List
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-emerald-200 transition-colors flex items-center gap-2 text-sm"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Add Invoice
+          </button>
+          <button
+            onClick={loadInvoices}
+            className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm flex items-center gap-2 text-sm font-medium"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh List
+          </button>
+        </div>
       </div>
+
 
       {notification && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl text-sm flex justify-between items-center shadow-sm">
@@ -117,6 +129,14 @@ export default function InvoicesPage() {
           <InvoiceList invoices={filteredInvoices} onRefresh={loadInvoices} />
         )}
       </div>
+
+      {/* Create Invoice Modal */}
+      <CreateInvoiceModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={loadInvoices}
+      />
     </div>
   );
 }
+

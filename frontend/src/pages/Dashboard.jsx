@@ -8,10 +8,12 @@ import {
   Zap,
   Play,
   RefreshCw,
-  Bell
+  Bell,
+  PlusCircle
 } from 'lucide-react';
 import { fetchInvoices, fetchMetrics, triggerSchedulerTick } from '../api/client';
 import InvoiceList from '../components/InvoiceList';
+import CreateInvoiceModal from '../components/CreateInvoiceModal';
 
 export default function Dashboard() {
   const [invoices, setInvoices] = useState([]);
@@ -20,6 +22,8 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [tickLoading, setTickLoading] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
 
   const loadData = async () => {
     try {
@@ -87,6 +91,13 @@ export default function Dashboard() {
 
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-emerald-200 transition-colors flex items-center gap-2 text-sm"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Add Invoice
+          </button>
+          <button
             onClick={loadData}
             className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm"
             title="Refresh Data"
@@ -106,6 +117,7 @@ export default function Dashboard() {
             Run Scheduler Tick Engine
           </button>
         </div>
+
       </div>
 
       {notification && (
@@ -246,6 +258,14 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Create Invoice Modal */}
+      <CreateInvoiceModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={loadData}
+      />
     </div>
   );
 }
+

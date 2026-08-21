@@ -3,9 +3,9 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite:///./promise_to_pay.db"
-    razorpay_key_id: str = ""
-    razorpay_key_secret: str = ""
+    database_url: str = "mysql+pymysql://root:123456789@localhost:3306/promise_to_pay_db"
+    razorpay_key_id: str = "rzp_test_mock12345"
+    razorpay_key_secret: str = "mock_secret_12345"
     razorpay_webhook_secret: str = ""
     llm_api_key: str = ""
     llm_provider: str = "anthropic"  # anthropic | gemini

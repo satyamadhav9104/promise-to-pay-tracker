@@ -1,6 +1,6 @@
 """
 Database seed script.
-Populates SQLite database with 50+ synthetic B2B invoices and initial sample promises/logs.
+Populates MySQL / SQLite database with 52 synthetic B2B invoices and initial sample promises/logs.
 """
 import os
 import json
@@ -10,6 +10,7 @@ from datetime import datetime
 # Add project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine, SessionLocal
 from app.models.invoice import Invoice, InvoiceStatus
@@ -19,7 +20,28 @@ from app.schemas.extraction import CustomerReplyInput
 from app.api.routes.promises import extract_and_log_reply
 
 
+def ensure_mysql_database_exists():
+    """Helper to execute CREATE DATABASE IF NOT EXISTS for MySQL before engine connects."""
+    if "mysql" in settings.database_url:
+        try:
+            import pymysql
+            connection = pymysql.connect(
+                host="localhost",
+                user="root",
+                password="123456789",
+                port=3306
+            )
+            with connection.cursor() as cursor:
+                cursor.execute("CREATE DATABASE IF NOT EXISTS promise_to_pay_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+            connection.commit()
+            connection.close()
+            print("MySQL database 'promise_to_pay_db' is ready.")
+        except Exception as e:
+            print(f"Database pre-creation check note: {e}")
+
+
 def seed():
+    ensure_mysql_database_exists()
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 

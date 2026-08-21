@@ -17,8 +17,8 @@ class PromiseStatus(str, enum.Enum):
 class Promise(Base):
     __tablename__ = "promises"
 
-    id = Column(String, primary_key=True)
-    invoice_id = Column(String, ForeignKey("invoices.id"), nullable=False)
+    id = Column(String(64), primary_key=True)
+    invoice_id = Column(String(64), ForeignKey("invoices.id"), nullable=False)
     promised_date = Column(DateTime, nullable=True)
     confidence_score = Column(Float, nullable=False)
     reasoning = Column(Text, nullable=True)

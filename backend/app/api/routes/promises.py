@@ -138,3 +138,60 @@ def extract_and_log_reply(input_data: CustomerReplyInput, db: Session = Depends(
         "extraction": result.model_dump(),
         "message": "Reply processed. No promise or claim detected."
     }
+
+
+@router.post("/{promise_id}/approve")
+def approve_promise(promise_id: str, db: Session = Depends(get_db)):
+    """User manually approves a customer's proposed payment promise date."""
+    promise = db.query(Promise).filter(Promise.id == promise_id).first()
+    if not promise:
+        raise HTTPException(status_code=404, detail=f"Promise '{promise_id}' not found.")
+
+    invoice = db.query(Invoice).filter(Invoice.id == promise.invoice_id).first()
+
+    promise.status = PromiseStatus.ACTIVE
+    if promise.promised_date and invoice:
+        invoice.due_date = promise.promised_date
+        db.add(invoice)
+        transition_invoice_status(
+            db, invoice, InvoiceStatus.PROMISE_MADE,
+            trigger="user_promise_approval",
+            actor="user",
+            rule_applied="human_approved_promise",
+            detail=f"Admin manually APPROVED customer payment promise for {promise.promised_date.strftime('%Y-%m-%d')}."
+        )
+
+    db.commit()
+    return {
+        "message": f"Promise approved for {promise.promised_date.strftime('%Y-%m-%d') if promise.promised_date else 'new date'}!",
+        "promise_id": promise_id,
+        "status": "approved",
+        "new_due_date": promise.promised_date.strftime('%Y-%m-%d') if promise.promised_date else None
+    }
+
+
+@router.post("/{promise_id}/reject")
+def reject_promise(promise_id: str, db: Session = Depends(get_db)):
+    """User manually rejects a customer's proposed promise date."""
+    promise = db.query(Promise).filter(Promise.id == promise_id).first()
+    if not promise:
+        raise HTTPException(status_code=404, detail=f"Promise '{promise_id}' not found.")
+
+    invoice = db.query(Invoice).filter(Invoice.id == promise.invoice_id).first()
+
+    promise.status = PromiseStatus.BROKEN
+    if invoice:
+        transition_invoice_status(
+            db, invoice, InvoiceStatus.ESCALATED,
+            trigger="user_promise_rejection",
+            actor="user",
+            rule_applied="human_rejected_promise",
+            detail=f"Admin REJECTED customer proposed payment promise date ({promise.source_text}). Invoice escalated."
+        )
+
+    db.commit()
+    return {
+        "message": f"Promise rejected. Invoice status set to escalated.",
+        "promise_id": promise_id,
+        "status": "rejected"
+    }

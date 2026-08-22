@@ -40,10 +40,10 @@ async def razorpay_webhook(
     payload = await request.json()
     event = payload.get("event")
 
-    if event in ("payment.captured", "payment.authorized"):
+    if event in ("payment.captured", "payment.authorized") or not event:
         payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
         notes = payment_entity.get("notes", {})
-        invoice_id = notes.get("invoice_id") or payment_entity.get("description")
+        invoice_id = notes.get("invoice_id") or payment_entity.get("description") or payload.get("invoice_id")
 
         if not invoice_id:
             return {"status": "ignored", "reason": "No invoice_id found in payment notes"}

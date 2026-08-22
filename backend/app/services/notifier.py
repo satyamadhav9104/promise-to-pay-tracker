@@ -78,22 +78,25 @@ def send_notification(
     Dispatches via Resend API or SMTP if configured. Otherwise logs simulated delivery.
     """
     to_email = recipient_email or f"{customer_name.lower().replace(' ', '.')}@example.com"
+    payment_link = f"https://rzp.io/l/pay_{customer_name.lower().replace(' ', '')}_inv"
 
     if channel == Channel.EMAIL:
         if touch_number == 1:
             subject = f"Friendly Reminder: Invoice Payment Due ({due_date_str})"
             body = (
                 f"Hi {customer_name},\n\n"
-                f"This is a gentle reminder that your invoice of ${amount:,.2f} was due on {due_date_str}.\n"
-                f"Please reply with your expected payment date or complete payment online.\n\n"
+                f"This is a gentle reminder that your invoice of ${amount:,.2f} was due on {due_date_str}.\n\n"
+                f"💳 Instant Razorpay Payment Link:\n{payment_link}\n\n"
+                f"Please reply with your expected payment date or complete payment via Razorpay link above.\n\n"
                 f"Thank you,\nCollections Team"
             )
         else:
             subject = f"Urgent: Overdue Invoice Payment (${amount:,.2f})"
             body = (
                 f"Dear {customer_name},\n\n"
-                f"Your invoice of ${amount:,.2f} is now significantly overdue.\n"
-                f"Please confirm your payment plan or settle payment immediately to prevent account escalation.\n\n"
+                f"Your invoice of ${amount:,.2f} is now significantly overdue.\n\n"
+                f"💳 Instant Razorpay Payment Verification Link:\n{payment_link}\n\n"
+                f"Please settle payment immediately via Razorpay link above to prevent account escalation.\n\n"
                 f"Sincerely,\nFinance & Accounts Department"
             )
 

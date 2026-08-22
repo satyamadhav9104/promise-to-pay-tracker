@@ -132,16 +132,200 @@ flowchart TD
 
 ## 🚀 How to Run Locally
 
-### 1. Start Backend Server:
+Follow this complete step-by-step guide to run **SMARTINVOICE** on your local machine.
+
+---
+
+### 📋 Prerequisites
+
+Ensure you have the following installed on your system:
+
+| Dependency | Minimum Version | Recommended | Notes |
+| :--- | :--- | :--- | :--- |
+| **Python** | `3.10+` | `3.12+` | Backend FastAPI engine |
+| **Node.js** | `18.0+` | `20.0+` | React + Vite frontend framework |
+| **npm** | `9.0+` | `10.0+` | Node package manager |
+| **Git** | `2.30+` | `Latest` | Version control |
+| **Docker** *(Optional)* | `24.0+` | `Latest` | For containerized execution |
+| **MySQL** *(Optional)* | `8.0+` | `8.0+` | Database (Embedded SQLite auto-used as zero-config fallback) |
+
+---
+
+### 🛠️ Method 1: Native Local Setup (Recommended for Development)
+
+#### Step 1: Clone Repository & Open Terminal
+```bash
+git clone https://github.com/satyamadhav9104/promise-to-pay-tracker.git
+cd promise-to-pay-tracker
+```
+
+#### Step 2: Start Backend Server (FastAPI Engine)
+
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+
+2. Create and activate a Python virtual environment:
+   - **macOS / Linux**:
+     ```bash
+     python3 -m venv venv
+     source venv/bin/activate
+     ```
+   - **Windows (PowerShell)**:
+     ```powershell
+     python -m venv venv
+     .\venv\Scripts\Activate.ps1
+     ```
+   - **Windows (Command Prompt)**:
+     ```cmd
+     python -m venv venv
+     venv\Scripts\activate.bat
+     ```
+
+3. Install required Python packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Configure Environment File (`.env`):
+   ```bash
+   cp .env.example .env
+   ```
+   *(Zero-config default settings work out-of-the-box using SQLite and Regex LLM parser if API keys are omitted).*
+
+5. Seed Database with 52 B2B Mock Invoices:
+   ```bash
+   python scripts/seed_invoices.py
+   ```
+   *Output: `Successfully seeded 52 synthetic invoices into database.`*
+
+6. Launch the FastAPI Uvicorn Server:
+   ```bash
+   python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+   ```
+   - 🌐 **API Root**: `http://127.0.0.1:8000`
+   - 📚 **Interactive Swagger API Docs**: `http://127.0.0.1:8000/docs`
+   - 📖 **ReDoc Documentation**: `http://127.0.0.1:8000/redoc`
+
+---
+
+#### Step 3: Start Frontend App (React + Vite + Tailwind)
+
+1. Open a **new terminal tab/window** and navigate to `frontend`:
+   ```bash
+   cd promise-to-pay-tracker/frontend
+   ```
+
+2. Install Node dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Copy environment configuration:
+   ```bash
+   cp .env.example .env
+   ```
+
+4. Launch Vite Development Server:
+   ```bash
+   npm run dev
+   ```
+
+5. Open your browser and visit:
+   - **`http://localhost:3000`** (or `http://localhost:5173`)
+
+---
+
+### 🐳 Method 2: Docker & Docker Compose Setup
+
+If you prefer containerized deployment, launch MySQL, FastAPI, and Nginx in Docker:
+
+```bash
+# Run from repository root
+docker-compose up --build
+```
+
+- **Frontend Container**: `http://localhost:80`
+- **Backend API**: `http://localhost:8000`
+- **MySQL Container**: Port `3306`
+
+To stop all containers:
+```bash
+docker-compose down
+```
+
+---
+
+### ⚙️ Environment Variables Reference
+
+| Variable Key | Description | Default / Recommended |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | SQLAlchemy connection string | `sqlite:///./promise_to_pay.db` (or `mysql+pymysql://root:password@localhost:3306/promise_to_pay_db`) |
+| `LLM_PROVIDER` | AI LLM Engine provider (`gemini` / `anthropic`) | `gemini` |
+| `LLM_API_KEY` | Google Gemini or Anthropic API Key | `your_api_key` (Regex parser fallback if empty) |
+| `RAZORPAY_KEY_ID` | Razorpay API Test Key ID | `rzp_test_TSRi5elb8AdVBV` |
+| `RAZORPAY_KEY_SECRET` | Razorpay API Test Key Secret | `mock_secret_12345` |
+| `RAZORPAY_WEBHOOK_SECRET` | Secret for HMAC-SHA256 Signature Verification | `your_webhook_secret` |
+| `RESEND_API_KEY` | Resend API Key for sending B2B reminder emails | `re_...` |
+| `MAX_TOUCHES_PER_INVOICE` | Max allowed collection outreach touches | `3` |
+| `COOLDOWN_DAYS_BETWEEN_TOUCHES` | Cooldown period between automated touches | `4` |
+| `PROMISE_CONFIDENCE_THRESHOLD` | Threshold for auto-approving promise dates | `0.7` |
+| `CLERK_PUBLISHABLE_KEY` | Clerk Authentication publishable key | `pk_test_...` |
+
+---
+
+### 🧪 Running Unit & Integration Tests
+
+To run the complete test suite (State machine, compliance rules, LLM extraction, race conditions, Razorpay webhooks):
+
 ```bash
 cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m pytest
 ```
 
-### 2. Start Frontend App:
+Run specific test modules:
 ```bash
-cd frontend
-npm run dev
+# Test Razorpay Webhooks
+python -m pytest tests/integration/test_webhook.py
+
+# Test Compliance Rules & Touch Cap
+python -m pytest tests/unit/test_rules.py
+
+# Test LLM Customer Reply Extractor
+python -m pytest tests/unit/test_llm_extractor.py
 ```
 
-Open **[http://localhost:3000/](http://localhost:3000/)** in your browser.
+---
+
+### 🔌 API Endpoints Cheat Sheet
+
+Once backend is running at `http://localhost:8000`:
+- **Health Check**: `GET /health`
+- **List Invoices**: `GET /api/invoices`
+- **Extract Customer Promise**: `POST /api/promises/extract`
+  ```json
+  {
+    "invoice_id": "INV-1001",
+    "reply_text": "We will process payment for invoice INV-1001 by 2026-09-01."
+  }
+  ```
+- **Approve Promise (HITL)**: `POST /api/promises/{promise_id}/approve`
+- **Razorpay Webhook Endpoint**: `POST /api/webhooks/razorpay`
+- **RAG Cash Flow Advice**: `GET /api/rag/advise`
+- **Audit Logs**: `GET /api/audit/logs`
+
+---
+
+### ❓ Frequently Asked Questions & Troubleshooting
+
+#### 1. **MySQL connection failed error?**
+> **No action required.** The app automatically detects if MySQL is offline and seamlessly falls back to an embedded SQLite database (`sqlite:///./promise_to_pay.db`).
+
+#### 2. **ModuleNotFoundError when running uvicorn or seed scripts?**
+> Ensure your virtual environment is active (`source venv/bin/activate` or `.\venv\Scripts\Activate.ps1`) and execute commands as `python -m uvicorn app.main:app`.
+
+#### 3. **Port 8000 or 3000 already in use?**
+> Specify a custom port for uvicorn: `python -m uvicorn app.main:app --port 8001`.
+
+

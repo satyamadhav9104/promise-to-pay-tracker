@@ -46,7 +46,7 @@ jobs:
           npm run build
 
   deploy-heroku:
-    name: 🚀 Deploy to Heroku Production
+    name: 🚀 Deploy to Heroku Demo
     needs: [test-backend, test-frontend]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest

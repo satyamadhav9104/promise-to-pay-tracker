@@ -15,7 +15,7 @@
 
 ![SMARTINVOICE Live Demo](docs/demo.jpg)  
 
-![SMARTINVOICE Live Demo Preview](docs/demo_preview.svg)
+
 
 ---
 

@@ -35,8 +35,8 @@ app.include_router(audit.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
 
 
-@app.get("/")
-def root():
+@app.get("/api/info")
+def api_info():
     return {
         "app": "Promise-to-Pay Tracker API",
         "track": "Track 03 — AI Revenue Recovery",

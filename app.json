@@ -1,0 +1,16 @@
+{
+  "name": "SMARTINVOICE - AI Revenue Recovery Engine",
+  "description": "Razorpay AI Buildathon Track 03: Promise-to-Pay Tracker & AI Revenue Recovery Engine",
+  "repository": "https://github.com/satyamadhav9104/promise-to-pay-tracker",
+  "keywords": ["fastapi", "react", "razorpay", "gemini", "buildathon"],
+  "buildpacks": [
+    { "url": "heroku/nodejs" },
+    { "url": "heroku/python" }
+  ],
+  "env": {
+    "PYTHON_VERSION": "3.12.0",
+    "CLERK_PUBLISHABLE_KEY": {
+      "value": "pk_test_Y29uY3JldGUtc2F3ZmlzaC0zMjQ1LmNsZXJrLmFjY291bnRzLmRldiQ"
+    }
+  }
+}

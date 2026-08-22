@@ -3,15 +3,18 @@
 > *Autonomous B2B Promise-to-Pay Tracker, Closed-Loop Razorpay Webhook Verification, and RAG Cash Flow Advisor.*
 
 [![CI/CD Pipeline](https://github.com/satyamadhav9104/promise-to-pay-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/satyamadhav9104/promise-to-pay-tracker/actions)
-[![Live Heroku App](https://img.shields.io/badge/Heroku-Live%20Production-blueviolet?style=flat&logo=heroku)](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com)
+[![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen?style=flat&logo=heroku)](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://python.org)
 [![React 18](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev)
 
 ---
 
-## 🌐 Live Production Application
-🔗 **Live App URL**: [https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com)  
-📂 **GitHub Repository**: [https://github.com/satyamadhav9104/promise-to-pay-tracker](https://github.com/satyamadhav9104/promise-to-pay-tracker)
+## 🎬 Live Demo
+
+👉 **[Launch Live Demo Application](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com)**  
+🔗 **Demo Link**: [https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com)
+
+![SMARTINVOICE Live Demo Preview](docs/demo_preview.svg)
 
 ---
 

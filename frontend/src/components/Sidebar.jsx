@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { UserButton, useUser } from '@clerk/clerk-react';
 
-export default function Sidebar({ activeTab, setActiveTab }) {
+export default function Sidebar({ activeTab, setActiveTab, onOpenAddInvoice }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'invoices', label: 'Invoices', icon: FileText },
@@ -31,7 +31,7 @@ export default function Sidebar({ activeTab, setActiveTab }) {
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex-col hidden sm:flex z-20 shadow-sm relative">
       {/* Brand Header */}
-      <div className="p-6 flex items-center gap-3 border-b border-gray-100">
+      <div className="p-5 flex items-center gap-3 border-b border-gray-100">
         <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-xl shadow-inner">
           S
         </div>
@@ -41,8 +41,18 @@ export default function Sidebar({ activeTab, setActiveTab }) {
         </div>
       </div>
 
+      {/* Primary Action Button in Sidebar */}
+      <div className="px-4 pt-4">
+        <button
+          onClick={onOpenAddInvoice}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl shadow-md shadow-indigo-200 transition-all flex items-center justify-center gap-2 text-xs"
+        >
+          <span className="text-base font-bold">+</span> Add New Invoice
+        </button>
+      </div>
+
       {/* Navigation */}
-      <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+      <nav className="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto">
         {navItems.map((item) => {
           const IconComponent = item.icon;
           const isActive = activeTab === item.id;

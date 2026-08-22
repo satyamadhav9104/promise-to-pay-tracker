@@ -29,8 +29,10 @@ export default function InvoicesPage() {
   }, [statusFilter]);
 
   const filteredInvoices = invoices.filter(inv => {
-    const matchesSearch = inv.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          inv.id.toLowerCase().includes(searchQuery.toLowerCase());
+    const name = inv.customer_name || inv.client_name || '';
+    const idStr = inv.id || inv.invoice_number || '';
+    const matchesSearch = name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          idStr.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesSearch;
   });
 

@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   Sparkles,
   ArrowUpRight,
+  ArrowDownLeft,
   Clock,
   MessageSquare,
   CreditCard,
@@ -38,7 +39,7 @@ function getDaysOverdue(dueDateStr) {
   return diffDays > 0 ? diffDays : 0;
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onOpenAddInvoice }) {
   const [invoices, setInvoices] = useState([]);
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -113,6 +114,14 @@ export default function Dashboard() {
       : 0
   );
 
+  const moneyToReceive = invoices
+    .filter((i) => (i.invoice_type || 'receivable') === 'receivable' && i.status !== 'paid')
+    .reduce((sum, i) => sum + (i.amount || 0), 0);
+
+  const pendingBillsToPay = invoices
+    .filter((i) => i.invoice_type === 'payable' && i.status !== 'paid')
+    .reduce((sum, i) => sum + (i.amount || 0), 0);
+
   // Invoices requiring attention (Top priority: escalated, overdue, promise_due, pending_verification)
   const attentionInvoices = [...invoices]
     .filter((i) => ['escalated', 'overdue', 'promise_due', 'pending_verification'].includes(i.status))
@@ -165,11 +174,11 @@ export default function Dashboard() {
             </button>
 
             <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="bg-white/10 hover:bg-white/20 text-white font-medium px-4 py-3.5 rounded-2xl border border-white/10 backdrop-blur-md transition-colors flex items-center justify-center gap-2 text-sm"
+              onClick={onOpenAddInvoice || (() => setIsCreateModalOpen(true))}
+              className="bg-white/10 hover:bg-white/20 text-white font-medium px-4 py-3.5 rounded-2xl border border-white/10 backdrop-blur-md transition-colors flex items-center justify-center gap-2 text-sm cursor-pointer"
             >
               <PlusCircle className="w-4 h-4 text-indigo-300" />
-              Add Invoice
+              Add Invoice / Bill
             </button>
           </div>
         </div>
@@ -186,6 +195,53 @@ export default function Dashboard() {
           </button>
         </div>
       )}
+
+      {/* 2 SEPARATE HIGHLIGHT BOXES: MONEY TO RECEIVE vs. PENDING BILLS TO PAY */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Box 1: Money to Receive (Receivables) */}
+        <div className="bg-gradient-to-br from-emerald-900 via-teal-950 to-slate-900 rounded-3xl p-6 shadow-xl border border-emerald-700/50 text-white relative overflow-hidden group hover:shadow-2xl transition-all">
+          <div className="flex justify-between items-start mb-3">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-300 bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-700/60">
+                📥 Money to Receive (Receivables)
+              </span>
+              <p className="text-xs text-emerald-200/80 mt-1.5 font-medium">Customer invoices you expect to collect before due date</p>
+            </div>
+            <div className="p-3 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 shadow-inner">
+              <ArrowDownLeft className="w-6 h-6" />
+            </div>
+          </div>
+          <h3 className="text-4xl font-extrabold text-white tracking-tight mt-3">
+            {formatINR(moneyToReceive)}
+          </h3>
+          <div className="mt-4 flex items-center justify-between text-xs text-emerald-300/90 border-t border-emerald-800/60 pt-3">
+            <span>Pending Customer Invoices: <strong>{invoices.filter(i => (i.invoice_type || 'receivable') === 'receivable' && i.status !== 'paid').length}</strong></span>
+            <span className="font-bold underline cursor-pointer" onClick={onOpenAddInvoice}>+ Add Invoice</span>
+          </div>
+        </div>
+
+        {/* Box 2: Pending Bills to Pay (Payables) */}
+        <div className="bg-gradient-to-br from-amber-900 via-orange-950 to-slate-900 rounded-3xl p-6 shadow-xl border border-amber-700/50 text-white relative overflow-hidden group hover:shadow-2xl transition-all">
+          <div className="flex justify-between items-start mb-3">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-300 bg-amber-950/80 px-2.5 py-1 rounded-lg border border-amber-700/60">
+                📤 Pending Bills (Money I Need to Pay)
+              </span>
+              <p className="text-xs text-amber-200/80 mt-1.5 font-medium">Vendor bills & expenses you must pay before due date</p>
+            </div>
+            <div className="p-3 rounded-2xl bg-amber-500/20 border border-amber-400/30 text-amber-300 shadow-inner">
+              <ArrowUpRight className="w-6 h-6" />
+            </div>
+          </div>
+          <h3 className="text-4xl font-extrabold text-white tracking-tight mt-3">
+            {formatINR(pendingBillsToPay)}
+          </h3>
+          <div className="mt-4 flex items-center justify-between text-xs text-amber-300/90 border-t border-amber-800/60 pt-3">
+            <span>Pending Vendor Bills: <strong>{invoices.filter(i => i.invoice_type === 'payable' && i.status !== 'paid').length}</strong></span>
+            <span className="font-bold underline cursor-pointer" onClick={onOpenAddInvoice}>+ Add Vendor Bill</span>
+          </div>
+        </div>
+      </div>
 
       {/* 3 Main Highlight Metric Cards (ASCII Match: Recovered, Recovery Rate, At Risk) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

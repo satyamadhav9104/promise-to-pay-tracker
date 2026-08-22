@@ -23,7 +23,10 @@ class Invoice(Base):
     __tablename__ = "invoices"
 
     id = Column(String(64), primary_key=True)
+    user_id = Column(String(255), nullable=True, index=True)
     customer_name = Column(String(255), nullable=False)
+    customer_email = Column(String(255), nullable=True)
+    invoice_type = Column(String(32), default="receivable", nullable=False)
     amount = Column(Float, nullable=False)
     due_date = Column(DateTime, nullable=False)
     created_date = Column(DateTime, default=datetime.utcnow)

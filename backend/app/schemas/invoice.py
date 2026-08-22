@@ -9,7 +9,10 @@ from app.schemas.promise import PromiseResponse
 
 class InvoiceBase(BaseModel):
     id: str
+    user_id: Optional[str] = None
     customer_name: str
+    customer_email: Optional[str] = None
+    invoice_type: Optional[str] = "receivable"
     amount: float
     due_date: datetime
 

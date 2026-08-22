@@ -32,10 +32,36 @@ def ensure_database_exists(url_str: str):
             print(f"[DB] Automatic database creation check note: {e}")
 
 
-# Ensure DB exists before engine initialization
-ensure_database_exists(settings.database_url)
+db_url = settings.database_url
 
-is_sqlite = settings.database_url.startswith("sqlite")
+# If default MySQL is unreachable in cloud container, fallback to embedded SQLite
+if db_url.startswith("mysql"):
+    try:
+        import pymysql
+        parsed = urlparse(db_url)
+        db_name = parsed.path.lstrip("/")
+        if db_name:
+            user = parsed.username or "root"
+            password = parsed.password or ""
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 3306
+
+            conn = pymysql.connect(
+                host=host,
+                user=user,
+                password=password,
+                port=port,
+                connect_timeout=2
+            )
+            with conn.cursor() as cursor:
+                cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        print(f"[DB Note] MySQL connection not available ({e}). Falling back to embedded SQLite.")
+        db_url = "sqlite:///./promise_to_pay.db"
+
+is_sqlite = db_url.startswith("sqlite")
 
 # Enable check_same_thread=False for SQLite
 engine_kwargs = {}
@@ -47,7 +73,7 @@ else:
     engine_kwargs["pool_recycle"] = 3600
 
 engine = create_engine(
-    settings.database_url,
+    db_url,
     echo=False,
     **engine_kwargs
 )

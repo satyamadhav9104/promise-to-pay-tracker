@@ -4,8 +4,9 @@ services:
     name: promise-to-pay-backend
     env: python
     plan: free
-    buildCommand: cd backend && pip install -r requirements.txt
-    startCommand: cd backend && gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
@@ -18,8 +19,9 @@ services:
   - type: web
     name: promise-to-pay-frontend
     env: static
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*

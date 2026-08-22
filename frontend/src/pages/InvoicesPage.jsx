@@ -26,6 +26,11 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     loadInvoices();
+    // Silent auto-refresh every 3 seconds for live demo webhook updates
+    const interval = setInterval(() => {
+      loadInvoices();
+    }, 3000);
+    return () => clearInterval(interval);
   }, [statusFilter]);
 
   const filteredInvoices = invoices.filter(inv => {

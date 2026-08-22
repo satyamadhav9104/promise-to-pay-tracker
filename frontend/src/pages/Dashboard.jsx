@@ -65,6 +65,11 @@ export default function Dashboard({ onOpenAddInvoice }) {
 
   useEffect(() => {
     loadData();
+    // Silent auto-refresh every 3 seconds for live demo webhook updates
+    const interval = setInterval(() => {
+      loadData();
+    }, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleRunTick = async () => {

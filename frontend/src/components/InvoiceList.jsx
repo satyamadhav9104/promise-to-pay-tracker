@@ -126,16 +126,8 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     setLoadingAction(true);
     try {
       const res = await sendInvoiceEmail(invoiceId);
-      const targetInvoice = invoices.find((i) => i.id === invoiceId);
-      if (onRefresh) await onRefresh();
-
-      if (targetInvoice) {
-        const amtStr = targetInvoice.amount ? Number(targetInvoice.amount).toLocaleString('en-US') : '12,500';
-        setReplyText(`Hi team, we acknowledge invoice ${targetInvoice.id} for $${amtStr}. We will complete the payment transfer by August 30, 2026.`);
-        setActiveModal({ type: 'reply', invoice: targetInvoice });
-      } else {
-        alert(res.message || `Automated recovery email dispatched to customer!`);
-      }
+      alert(res.message || `Automated recovery email dispatched to customer!`);
+      if (onRefresh) onRefresh();
     } catch (err) {
       alert('Error sending email: ' + err.message);
     } finally {

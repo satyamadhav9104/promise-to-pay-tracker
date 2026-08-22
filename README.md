@@ -14,9 +14,8 @@
 👉 **[Launch Live Demo Application](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com)**
 
 ![SMARTINVOICE Live Demo](docs/demo.jpg)  
-🔗 **Demo Link**: [https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com)
 
-
+![SMARTINVOICE Live Demo Preview](docs/demo_preview.svg)
 
 ---
 

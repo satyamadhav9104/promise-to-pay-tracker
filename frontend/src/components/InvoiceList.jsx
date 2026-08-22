@@ -126,8 +126,16 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     setLoadingAction(true);
     try {
       const res = await sendInvoiceEmail(invoiceId);
-      alert(res.message || `Automated recovery email dispatched to customer!`);
-      if (onRefresh) onRefresh();
+      const targetInvoice = invoices.find((i) => i.id === invoiceId);
+      if (onRefresh) await onRefresh();
+
+      if (targetInvoice) {
+        const amtStr = targetInvoice.amount ? Number(targetInvoice.amount).toLocaleString('en-US') : '12,500';
+        setReplyText(`Hi team, we acknowledge invoice ${targetInvoice.id} for $${amtStr}. We will complete the payment transfer by August 30, 2026.`);
+        setActiveModal({ type: 'reply', invoice: targetInvoice });
+      } else {
+        alert(res.message || `Automated recovery email dispatched to customer!`);
+      }
     } catch (err) {
       alert('Error sending email: ' + err.message);
     } finally {
@@ -385,7 +393,8 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                               {invoice.invoice_type !== 'payable' && (
                                 <button
                                   onClick={() => {
-                                    setReplyText('');
+                                    const amtStr = invoice.amount ? Number(invoice.amount).toLocaleString('en-US') : '12,500';
+                                    setReplyText(`Hi team, we acknowledge invoice ${invoice.id} for $${amtStr}. We will complete the payment transfer by August 30, 2026.`);
                                     setActiveModal({ type: 'reply', invoice });
                                   }}
                                   className="px-2.5 py-1.5 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium border border-indigo-200 transition-colors flex items-center gap-1"

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.base import Base
 from app.db.session import engine
-from app.api.routes import invoices, promises, webhooks, audit
+from app.api.routes import invoices, promises, webhooks, audit, rag
 
 # Initialize database tables
 Base.metadata.create_all(bind=engine)
@@ -32,6 +32,7 @@ app.include_router(invoices.router, prefix="/api")
 app.include_router(promises.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
+app.include_router(rag.router, prefix="/api")
 
 
 @app.get("/")

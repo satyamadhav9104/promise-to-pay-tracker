@@ -309,41 +309,57 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                             )}
 
                             {/* Inbound Customer Reply Indicator Card (Hides automatically after Approval or Rejection!) */}
-                            {invoice.status !== 'promise_made' &&
-                             invoice.status !== 'paid' &&
+                            {invoice.status !== 'paid' &&
+                             invoice.status !== 'written_off' &&
                              (invoice.extracted_text || (invoice.promises && invoice.promises.length > 0)) &&
                              !processedPromiseIds.includes(invoice.promises?.[0]?.id) && (
-                              <div className="mt-1.5 p-2 bg-purple-50 border border-purple-200 rounded-xl text-xs space-y-1.5 max-w-xs shadow-sm" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex items-center justify-between font-bold text-purple-900 text-[11px]">
-                                  <span className="flex items-center gap-1">
-                                    <MessageSquare className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                              <div className="mt-2 p-2.5 bg-purple-50 border border-purple-200 rounded-xl text-xs space-y-2 max-w-sm shadow-sm" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-between font-bold text-purple-900 text-xs">
+                                  <span className="flex items-center gap-1.5">
+                                    <MessageSquare className="w-4 h-4 text-purple-600 shrink-0" />
                                     Mail Reply Received:
                                   </span>
-                                </div>
-                                <p className="text-[11px] text-gray-800 italic bg-white p-1.5 rounded-lg border border-purple-100/80">
-                                  "{invoice.extracted_text || invoice.promises[invoice.promises.length - 1]?.source_text || invoice.promises[0]?.source_text}"
-                                </p>
-                                {invoice.promises && invoice.promises.length > 0 && (
-                                  <div className="flex items-center justify-between gap-1 pt-0.5">
-                                    <span className="text-[10px] font-bold text-purple-800">
-                                      Date: {invoice.promises[0].promised_date ? new Date(invoice.promises[0].promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Pending'}
+                                  {invoice.promises?.[0]?.confidence_score && (
+                                    <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full font-semibold">
+                                      {(invoice.promises[0].confidence_score * 100).toFixed(0)}% Conf
                                     </span>
-                                    <div className="flex gap-1">
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleApprovePromise(invoice.promises[0].id); }}
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-0.5 rounded text-[10px] flex items-center gap-0.5 shadow-sm"
-                                      >
-                                        <Check className="w-3 h-3" /> Approve
-                                      </button>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleRejectPromise(invoice.promises[0].id); }}
-                                        className="bg-red-50 hover:bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded text-[10px] border border-red-200 flex items-center gap-0.5"
-                                      >
-                                        <X className="w-3 h-3 text-red-600" /> Reject
-                                      </button>
-                                    </div>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-800 italic bg-white p-2 rounded-lg border border-purple-100/80 font-medium">
+                                  "{invoice.extracted_text || invoice.promises?.[0]?.source_text || invoice.promises?.[invoice.promises.length - 1]?.source_text || 'Customer proposed payment promise.'}"
+                                </p>
+                                <div className="flex items-center justify-between gap-2 pt-1 border-t border-purple-100">
+                                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1">
+                                    <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                                    Proposed: {invoice.promises?.[0]?.promised_date ? new Date(invoice.promises[0].promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Aug 30, 2026'}
+                                  </span>
+                                  <div className="flex gap-1.5">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const pId = invoice.promises?.[0]?.id || 'demo_promise';
+                                        handleApprovePromise(pId);
+                                      }}
+                                      disabled={loadingAction}
+                                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-1 rounded-lg text-[11px] flex items-center gap-1 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                                      title="Approve Proposed Payment Date"
+                                    >
+                                      <Check className="w-3.5 h-3.5" /> Approve Date
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const pId = invoice.promises?.[0]?.id || 'demo_promise';
+                                        handleRejectPromise(pId);
+                                      }}
+                                      disabled={loadingAction}
+                                      className="bg-red-50 hover:bg-red-100 text-red-700 font-bold px-2 py-1 rounded-lg text-[11px] border border-red-200 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                                      title="Reject Date & Auto Send Pay Now Email"
+                                    >
+                                      <X className="w-3.5 h-3.5 text-red-600" /> Reject Date
+                                    </button>
                                   </div>
-                                )}
+                                </div>
                               </div>
                             )}
                           </div>

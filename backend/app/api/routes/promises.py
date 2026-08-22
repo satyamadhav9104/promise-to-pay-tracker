@@ -13,6 +13,8 @@ from app.schemas.extraction import CustomerReplyInput, PromiseExtractionResult
 from app.schemas.promise import PromiseResponse
 from app.services.llm_extractor import extract_promise_from_reply
 from app.services.state_machine import transition_invoice_status
+from app.services.notifier import send_notification
+from app.core.rules import Channel
 
 router = APIRouter(prefix="/promises", tags=["Promises & Replies"])
 
@@ -189,9 +191,24 @@ def reject_promise(promise_id: str, db: Session = Depends(get_db)):
             detail=f"Admin REJECTED customer proposed payment promise date ({promise.source_text}). Invoice escalated."
         )
 
+        # Automatically send "Pay Now" reminder email to customer with Razorpay payment link
+        invoice.touch_count += 1
+        invoice.last_touch_at = datetime.utcnow()
+        due_str = invoice.due_date.strftime("%Y-%m-%d") if invoice.due_date else "N/A"
+        recipient = getattr(invoice, 'customer_email', None) or f"{invoice.customer_name.lower().replace(' ', '.')}@example.com"
+        
+        send_notification(
+            customer_name=invoice.customer_name,
+            channel=Channel.EMAIL,
+            touch_number=invoice.touch_count,
+            amount=invoice.amount,
+            due_date_str=due_str,
+            recipient_email=recipient
+        )
+
     db.commit()
     return {
-        "message": f"Promise rejected. Invoice status set to escalated.",
+        "message": f"Promise date rejected! Invoice escalated and automated 'Pay Now' reminder email sent to customer.",
         "promise_id": promise_id,
         "status": "rejected"
     }

@@ -1,0 +1,30 @@
+name: Sync Main Back to Develop
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync-develop:
+    name: 🔄 Auto-Sync Main into Develop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git User
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge main into develop
+        run: |
+          git checkout develop
+          git pull origin develop
+          git merge --no-ff origin/main -m "chore(git): auto-sync main into develop [skip ci]"
+          git push origin develop
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

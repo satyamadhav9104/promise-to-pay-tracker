@@ -1,0 +1,25 @@
+#!/bin/sh
+# Git pre-push hook enforcing branch naming architecture rules
+
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+# Protected and architecture-standard branch patterns
+VALID_PATTERN="^(main|develop|feature\/[a-zA-Z0-9._-]+|hotfix\/[a-zA-Z0-9._-]+|release\/[a-zA-Z0-9._-]+|fix\/[a-zA-Z0-9._-]+|chore\/[a-zA-Z0-9._-]+)$"
+
+if [ -n "$CURRENT_BRANCH" ]; then
+    if ! echo "$CURRENT_BRANCH" | grep -qE "$VALID_PATTERN"; then
+        echo "❌ [Git Hook Error] Invalid branch name: '$CURRENT_BRANCH'"
+        echo ""
+        echo "📌 Permitted Branch Name Prefixes:"
+        echo "   - main                    (Production deployment)"
+        echo "   - develop                 (Active integration branch)"
+        echo "   - feature/<name>          (e.g., feature/login, feature/payment, feature/profile)"
+        echo "   - release/v<semver>       (e.g., release/v1.1.0)"
+        echo "   - hotfix/v<semver>        (e.g., hotfix/v1.0.1)"
+        echo "   - fix/<name>, chore/<name>"
+        echo ""
+        exit 1
+    fi
+fi
+
+exit 0

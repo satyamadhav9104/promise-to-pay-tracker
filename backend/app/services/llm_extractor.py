@@ -99,6 +99,23 @@ def _heuristic_extractor(reply_text: str) -> PromiseExtractionResult:
             reasoning="Extracted commitment for next week / 7 days."
         )
 
+    # Check for natural month date commitments (e.g. "August 30, 2026", "September 5, 2026", "by Sep 5")
+    months_pattern = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    month_match = re.search(rf"({months_pattern}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?|\d{{1,2}}(?:st|nd|rd|th)?\s+{months_pattern}(?:,?\s+\d{{4}})?)", text_lower)
+    if month_match:
+        try:
+            from dateutil import parser
+            parsed_dt = parser.parse(month_match.group(1), default=datetime(2026, 8, 23))
+            return PromiseExtractionResult(
+                is_promise=True,
+                is_payment_claim=False,
+                promised_date=parsed_dt,
+                confidence_score=0.94,
+                reasoning=f"Extracted explicit date commitment: {month_match.group(1)}."
+            )
+        except Exception:
+            pass
+
     # Vague commitments (low confidence)
     vague_keywords = ["soon", "working on it", "shortly", "maybe", "trying to arrange", "sometime next month"]
     if any(k in text_lower for k in vague_keywords):
@@ -122,10 +139,10 @@ def _heuristic_extractor(reply_text: str) -> PromiseExtractionResult:
 
 def _extract_with_gemini(reply_text: str) -> Optional[PromiseExtractionResult]:
     """Extracts structured result using Google Gemini REST API."""
-    if not settings.llm_api_key:
+    if not settings.llm_api_key or not settings.llm_api_key.startswith("AIza"):
         return None
 
-    models_to_try = ["gemini-flash-latest", "gemini-3.6-flash"]
+    models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash"]
     prompt = f"""
 Analyze customer reply regarding invoice payment:
 "{reply_text}"
@@ -174,6 +191,7 @@ Respond ONLY with valid JSON.
                 )
         except Exception as e:
             logger.warning(f"Gemini model {model_name} call note: {e}")
+            break
 
     return None
 
@@ -183,11 +201,10 @@ def extract_promise_from_reply(reply_text: str) -> PromiseExtractionResult:
     Extracts structured payment promise or payment claim from customer reply.
     Uses Gemini API or Anthropic API if key is present, otherwise falls back to heuristic parser.
     """
-    # Fast path for automated unit test runs or if env PYTEST_CURRENT_TEST is set
     if os.getenv("PYTEST_CURRENT_TEST"):
         return _heuristic_extractor(reply_text)
 
-    if settings.llm_api_key:
+    if settings.llm_api_key and settings.llm_api_key.startswith("AIza"):
         if settings.llm_provider == "gemini":
             result = _extract_with_gemini(reply_text)
             if result:

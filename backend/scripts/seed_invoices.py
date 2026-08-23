@@ -42,6 +42,7 @@ def ensure_mysql_database_exists():
 
 def seed():
     ensure_mysql_database_exists()
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 

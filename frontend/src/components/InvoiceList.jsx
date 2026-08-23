@@ -39,10 +39,13 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
   const [loadingAction, setLoadingAction] = useState(false);
   const [processedPromiseIds, setProcessedPromiseIds] = useState([]);
 
-  const filteredInvoices = invoices.filter((invoice) => {
+  const filteredInvoices = (invoices || []).filter((invoice) => {
+    if (!invoice) return false;
+    const name = (invoice.customer_name || invoice.client_name || '').toLowerCase();
+    const idStr = (invoice.id || invoice.invoice_number || '').toLowerCase();
     const matchesSearch =
-      invoice.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      invoice.id.toLowerCase().includes(searchTerm.toLowerCase());
+      name.includes(searchTerm.toLowerCase()) ||
+      idStr.includes(searchTerm.toLowerCase());
     const matchesStatus = filterStatus === 'All' || invoice.status === filterStatus;
     const matchesCategory =
       filterCategory === 'All' ||
@@ -80,8 +83,11 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
   };
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+    const currencyCode = localStorage.getItem('smartinvoice_currency') || 'INR';
+    const currencySymbol = currencyCode === 'INR' ? '₹' : currencyCode === 'EUR' ? '€' : currencyCode === 'GBP' ? '£' : '$';
+    return `${currencySymbol}${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
   };
+
 
   const handleReplySubmit = async (e) => {
     e.preventDefault();
@@ -246,8 +252,8 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                             <FileSignature className="w-5 h-5" />
                           </div>
                           <div>
-                            <p className="font-semibold text-gray-900">{invoice.id}</p>
-                            <p className="text-xs text-gray-500 sm:hidden mt-0.5">{invoice.customer_name}</p>
+                            <p className="font-semibold text-gray-900">{invoice.id || invoice.invoice_number || 'INV-000'}</p>
+                            <p className="text-xs text-gray-500 sm:hidden mt-0.5">{invoice.customer_name || invoice.client_name || 'Client'}</p>
 
                             {/* Category Pill */}
                             <div className="flex items-center gap-1.5 mt-1">
@@ -337,14 +343,15 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                         </div>
                       </td>
                       <td className="px-6 py-4 hidden sm:table-cell">
-                        <span className="font-medium text-gray-700">{invoice.customer_name}</span>
+                        <span className="font-medium text-gray-700">{invoice.customer_name || invoice.client_name || 'Client'}</span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-1.5 font-semibold text-xs text-gray-800 bg-gray-100/90 px-2.5 py-1 rounded-lg w-fit border border-gray-200/80">
                           <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                          <span>{new Date(invoice.due_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                          <span>{invoice.due_date ? new Date(invoice.due_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}</span>
                         </div>
                       </td>
+
                       <td className="px-6 py-4">
                         <span className="font-semibold text-gray-900">{formatCurrency(invoice.amount)}</span>
                       </td>

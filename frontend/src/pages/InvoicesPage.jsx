@@ -176,11 +176,12 @@ export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport }) {
 
       {/* Create Invoice Modal */}
       <CreateInvoiceModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
+        isOpen={isLocalCreateModalOpen}
+        onClose={() => setIsLocalCreateModalOpen(false)}
         onSuccess={loadInvoices}
       />
     </div>
   );
 }
+
 

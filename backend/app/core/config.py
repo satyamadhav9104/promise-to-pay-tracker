@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    app_version: str = "1.1.0"
     database_url: str = "mysql+pymysql://root:123456789@localhost:3306/promise_to_pay_db"
     razorpay_key_id: str = "rzp_test_mock12345"
     razorpay_key_secret: str = "mock_secret_12345"

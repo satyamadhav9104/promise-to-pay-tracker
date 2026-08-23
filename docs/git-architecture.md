@@ -1,88 +1,85 @@
-# Complete Git Architecture & Branching Strategy
+# Production Git Architecture & Strategy — Promise-to-Pay Tracker
 
-A complete, production-grade Git architecture and branching model designed for robust CI/CD, isolated release staging, rapid hotfixing, and auditable code history.
+Enterprise-grade Git architecture and branching model designed for robust CI/CD, isolated release staging, rapid hotfixing, and auditable code history.
 
 ---
 
-## 1. High-Level Architecture Diagram
+## 1. Complete Git Architecture Diagram
 
 ```
-                                      ┌────────────────────────────────────────────────────────┐
-                                      │                      main (PROD)                       │
-                                      │            Protected • Tagged (v1.2.0, v1.2.1)         │
-                                      └──────────▲────────────────────────▲─────────────────┬──┘
-                                                 │                        │                 │
-                                            Release Merge            Hotfix Merge      Branch Hotfix
-                                            (v1.2.0 Tag)             (v1.2.1 Tag)      (Critical Bug)
-                                                 │                        │                 │
-                                      ┌──────────┴──────────┐   ┌─────────┴─────────┐       │
-                                      │   release/v1.2.0    │   │ hotfix/auth-leak  │◄──────┘
-                                      │ Staging / UAT / Q&A │   │ Urgent Prod Fix   │
-                                      └──────▲──────────┬───┘   └─────────┬─────────┘
-                                             │          │                 │
-                                        Cut Release   Sync Back         Sync Back
-                                        (Freeze)      Bugfixes          Hotfix
-                                             │          │                 │
-                                      ┌──────┴──────────▼─────────────────▼───┐
-                                      │            develop (DEV/QA)           │
-                                      │      Integration • Auto-Test Suites   │
-                                      └──────▲───────────────▲─────────────▲──┘
-                                             │               │             │
-                                        PR / Review     PR / Review   PR / Review
-                                             │               │             │
-                              ┌──────────────┴──┐  ┌─────────┴──┐  ┌───────┴─────────┐
-                              │  feature/login  │  │ feat/pay   │  │ feature/profile │
-                              │   (Local/Dev)   │  │(Local/Dev) │  │   (Local/Dev)   │
-                              └─────────────────┘  └────────────┘  └─────────────────┘
+                            PRODUCTION
+                              │
+                              ▼
+                           main
+                            │
+                       v1.0.0 tag
+                            │
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+          hotfix                        release
+             │                             │
+          v1.0.1                        v1.1.0
+             │                             │
+             ▼                             ▼
+           main ◄────────────────────── develop
+                                         ▲
+                                         │
+                              ┌──────────┼──────────┐
+                              │          │          │
+                           feature    feature    feature
+                           /login    /payment   /profile
 ```
 
 ---
 
-## 2. Interactive Mermaid Architecture
+## 2. Interactive Mermaid Architecture Flow
 
 ```mermaid
 gitGraph
-    commit id: "v1.1.0" tag: "v1.1.0"
+    commit id: "Initial Commit"
+    commit id: "v1.0.0 Tagged" tag: "v1.0.0"
     branch develop
     checkout develop
-    commit id: "init-sprint"
+    commit id: "init-develop"
     
     branch feature/login
     checkout feature/login
-    commit id: "feat: oauth flow"
-    commit id: "feat: session mgmt"
+    commit id: "feat(auth): login session & OAuth"
     
     branch feature/payment
     checkout feature/payment
-    commit id: "feat: razorpay webhook"
+    commit id: "feat(payment): razorpay webhook reconciler"
+    
+    branch feature/profile
+    checkout feature/profile
+    commit id: "feat(profile): user workspace schemas"
     
     checkout develop
-    merge feature/login id: "merge: login PR"
-    
-    checkout develop
-    merge feature/payment id: "merge: payment PR"
-    
-    branch release/v1.2.0
-    checkout release/v1.2.0
-    commit id: "chore: bump version v1.2.0"
-    commit id: "fix: staging ui polish"
+    merge feature/login id: "merge: PR #101 feature/login"
+    merge feature/payment id: "merge: PR #102 feature/payment"
+    merge feature/profile id: "merge: PR #103 feature/profile"
     
     checkout main
-    merge release/v1.2.0 tag: "v1.2.0" id: "release: v1.2.0"
-    
-    checkout develop
-    merge release/v1.2.0 id: "sync: release back to develop"
-    
-    checkout main
-    branch hotfix/auth-leak
-    checkout hotfix/auth-leak
-    commit id: "fix: token validation"
+    branch hotfix/v1.0.1
+    checkout hotfix/v1.0.1
+    commit id: "fix(security): input sanitization patch" tag: "v1.0.1"
     
     checkout main
-    merge hotfix/auth-leak tag: "v1.2.1" id: "hotfix: v1.2.1"
+    merge hotfix/v1.0.1 id: "hotfix: v1.0.1 emergency patch"
     
     checkout develop
-    merge hotfix/auth-leak id: "sync: hotfix back to develop"
+    merge hotfix/v1.0.1 id: "merge: sync hotfix v1.0.1"
+    
+    branch release/v1.1.0
+    checkout release/v1.1.0
+    commit id: "chore(release): bump v1.1.0"
+    
+    checkout main
+    merge release/v1.1.0 tag: "v1.1.0" id: "release: v1.1.0 Production"
+    
+    checkout develop
+    merge release/v1.1.0 id: "merge: sync release v1.1.0"
 ```
 
 ---
@@ -91,18 +88,18 @@ gitGraph
 
 | Branch Type | Naming Convention | Origin Branch | Merge Target | Environment Deployed | Merge Strategy |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Production** | `main` | *Root* | *None (Protected)* | **Production** | `--no-ff` (Release Tag) |
-| **Integration** | `develop` | `main` | `main` (via release) | **QA / Dev Integration** | `--no-ff` or Squash (per PR) |
-| **Feature** | `feature/<name>` | `develop` | `develop` | **Ephemeral / Local** | Squash & Merge or Rebase |
-| **Release** | `release/vX.Y.Z` | `develop` | `main` & `develop` | **Staging / Pre-prod / UAT**| `--no-ff` (Create Tag) |
-| **Hotfix** | `hotfix/<name>` | `main` | `main` & `develop` | **Staging -> Prod** | `--no-ff` (Patch Tag) |
-| **Bugfix/Chore**| `fix/<name>`, `chore/<name>` | `develop` | `develop` | **Ephemeral / Local** | Squash & Merge |
+| **Production** | `main` | *Root* | *None (Protected)* | **Production (Live)** | `--no-ff` (Version Tagged) |
+| **Integration** | `develop` | `main` | `main` (via release) | **QA / Dev Integration** | `--no-ff` (PR Merges) |
+| **Feature** | `feature/<name>` | `develop` | `develop` | **Local / Ephemeral** | PR Review + `--no-ff` |
+| **Release** | `release/vX.Y.Z` | `develop` | `main` & `develop` | **Staging / UAT** | `--no-ff` (Create Tag) |
+| **Hotfix** | `hotfix/vX.Y.Z` | `main` (tag) | `main` & `develop` | **Staging -> Prod** | `--no-ff` (Patch Tag) |
+| **Bugfix/Chore**| `fix/<name>`, `chore/<name>` | `develop` | `develop` | **Local / CI** | Squash or `--no-ff` |
 
 ---
 
 ## 4. End-to-End Workflow Playbooks
 
-### Workflow A: Feature Development Flow
+### Workflow 1: Feature Development (`feature/login`, `feature/payment`, `feature/profile`)
 ```bash
 # 1. Update local develop branch
 git checkout develop
@@ -115,95 +112,102 @@ git checkout -b feature/login
 git commit -m "feat(auth): implement Google OAuth handler"
 git commit -m "test(auth): add unit tests for token verification"
 
-# 4. Rebase onto latest develop before opening PR
-git fetch origin
-git rebase origin/develop
-
-# 5. Push branch and open Pull Request into develop
+# 4. Push branch and open Pull Request into develop
 git push -u origin feature/login
+
+# 5. Merge into develop
+git checkout develop
+git merge --no-ff feature/login -m "merge: PR #101 feature/login into develop"
 ```
 
-### Workflow B: Release Staging & Deployment Flow
+### Workflow 2: Release Staging & Deployment (`release/v1.1.0`)
 ```bash
 # 1. Cut release branch from develop when feature freeze begins
 git checkout develop && git pull origin develop
-git checkout -b release/v1.2.0
+git checkout -b release/v1.1.0
 
-# 2. Only changelog, version bumps, and bugfixes allowed on release branch
-git commit -m "chore(release): bump version to 1.2.0"
-git push -u origin release/v1.2.0
+# 2. Version bumps & changelog updates
+git commit -m "chore(release): bump version to v1.1.0"
 
-# 3. Once Staging/QA passes, merge into main and tag
+# 3. Merge into main and tag
 git checkout main && git pull origin main
-git merge --no-ff release/v1.2.0 -m "release: v1.2.0 — Production Release"
-git tag -a v1.2.0 -m "Release v1.2.0"
+git merge --no-ff release/v1.1.0 -m "release: v1.1.0 — Production Release"
+git tag -a v1.1.0 -m "Release v1.1.0: Production release with Auth, Payments, and Profiles"
 git push origin main --tags
 
-# 4. CRITICAL: Sync bug fixes & release commits back into develop
+# 4. CRITICAL: Sync release back into develop
 git checkout develop
-git merge --no-ff release/v1.2.0 -m "merge: sync release v1.2.0 back to develop"
+git merge --no-ff release/v1.1.0 -m "merge: sync release v1.1.0 back to develop"
 git push origin develop
-
-# 5. Clean up remote and local release branches
-git branch -d release/v1.2.0
-git push origin --delete release/v1.2.0
 ```
 
-### Workflow C: Emergency Production Hotfix Flow
+### Workflow 3: Emergency Production Hotfix (`hotfix/v1.0.1`)
 ```bash
-# 1. Branch immediately from main (production state)
+# 1. Branch immediately from main or release tag
 git checkout main && git pull origin main
-git checkout -b hotfix/auth-leak
+git checkout -b hotfix/v1.0.1 v1.0.0
 
-# 2. Fix the bug, test, and commit
-git commit -m "fix(security): sanitize JWT token verification"
-git push -u origin hotfix/auth-leak
+# 2. Apply fix and test
+git commit -m "fix(security): sanitize input validation (Hotfix v1.0.1)"
+git tag -a v1.0.1 -m "Hotfix v1.0.1: Emergency security patch"
 
-# 3. Merge hotfix to main and tag patch version
+# 3. Merge hotfix to main
 git checkout main
-git merge --no-ff hotfix/auth-leak -m "hotfix: v1.2.1 patch"
-git tag -a v1.2.1 -m "Patch release v1.2.1"
+git merge --no-ff hotfix/v1.0.1 -m "hotfix: v1.0.1 emergency production security patch"
 git push origin main --tags
 
-# 4. CRITICAL: Sync hotfix back into develop (and active release branch if open)
+# 4. CRITICAL: Sync hotfix back into develop
 git checkout develop
-git merge --no-ff hotfix/auth-leak -m "merge: sync hotfix v1.2.1 to develop"
+git merge --no-ff hotfix/v1.0.1 -m "merge: sync hotfix v1.0.1 back to develop"
 git push origin develop
-
-# 5. Clean up hotfix branch
-git branch -d hotfix/auth-leak
-git push origin --delete hotfix/auth-leak
 ```
 
 ---
 
-## 5. Commit Standards (Conventional Commits)
+## 5. CLI Automation Script
 
-Format: `<type>(<scope>): <short summary>`
+Run the built-in CLI automation scripts in `./scripts/`:
 
+```powershell
+# PowerShell
+.\scripts\git-workflow.ps1 feature-start login
+.\scripts\git-workflow.ps1 feature-finish login
+
+.\scripts\git-workflow.ps1 release-start 1.1.0
+.\scripts\git-workflow.ps1 release-finish 1.1.0
+
+.\scripts\git-workflow.ps1 hotfix-start 1.0.1
+.\scripts\git-workflow.ps1 hotfix-finish 1.0.1
+
+.\scripts\git-workflow.ps1 sync-develop
+.\scripts\git-workflow.ps1 status-graph
 ```
-feat(webhook): handle razorpay payment.captured event
-fix(scheduler): pause escalation on unverified claim
-test(extractor): add test fixtures for date parsing
-docs(api): document invoice status state machine
-chore(ci): update github actions python version to 3.12
+
+```bash
+# Linux / macOS / Git Bash
+./scripts/git-workflow.sh feature-start login
+./scripts/git-workflow.sh feature-finish login
+
+./scripts/git-workflow.sh release-start 1.1.0
+./scripts/git-workflow.sh release-finish 1.1.0
+
+./scripts/git-workflow.sh hotfix-start 1.0.1
+./scripts/git-workflow.sh hotfix-finish 1.0.1
+
+./scripts/git-workflow.sh sync-develop
+./scripts/git-workflow.sh status-graph
 ```
 
 ---
 
-## 6. GitHub Branch Protection & Governance Rules
+## 6. Git Hooks & Governance
 
-1. **`main` Branch (Production)**:
-   - 🔒 Direct commits disabled (`git push origin main` rejected).
-   - 🔒 Requires Pull Request with minimum **2 approvals**.
-   - 🔒 Requires all CI checks (`Backend Pytest`, `Frontend Build`, `Security Scan`) to pass.
-   - 🔒 Force pushes and branch deletions disabled.
+Install the repository hooks:
+```powershell
+.\scripts\setup-git-hooks.ps1
+# or
+./scripts/setup-git-hooks.sh
+```
 
-2. **`develop` Branch (Integration)**:
-   - 🔒 Direct commits disabled for feature work.
-   - 🔒 Requires Pull Request with minimum **1 approval**.
-   - 🔒 Auto-runs CI suite on every push and PR.
-   - 🔒 Automatically deletes merged feature branches.
-
-3. **Release & Hotfix Sync Guard**:
-   - Every merge into `main` must have a corresponding sync merge back into `develop` to prevent regression bugs.
+- **`commit-msg` Hook**: Enforces Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`).
+- **`pre-push` Hook**: Restricts branch creation strictly to `main`, `develop`, `feature/*`, `hotfix/*`, `release/*`, `fix/*`.

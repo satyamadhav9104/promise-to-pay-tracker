@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop, 'release/**', 'hotfix/**']
+    branches: [main, develop, 'release/**', 'hotfix/**', 'feature/**', 'fix/**']
   pull_request:
     branches: [main, develop, 'release/**', 'hotfix/**']
 
@@ -46,7 +46,7 @@ jobs:
           npm run build
 
   deploy-heroku:
-    name: 🚀 Deploy to Heroku Demo
+    name: 🚀 Deploy to Heroku Production
     needs: [test-backend, test-frontend]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest

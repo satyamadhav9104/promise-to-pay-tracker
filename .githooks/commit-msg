@@ -1,0 +1,42 @@
+#!/bin/sh
+# Git commit-msg hook enforcing Conventional Commits format
+# Examples:
+#   feat(auth): add OAuth login
+#   fix(payment): resolve razorpay webhook signature mismatch
+#   hotfix: v1.0.1 emergency patch
+#   release: v1.1.0 production release
+#   merge: PR #101 feature/login into develop
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(head -n 1 "$COMMIT_MSG_FILE")
+
+# Allow merge commits automatically
+if echo "$COMMIT_MSG" | grep -qE '^Merge ' || echo "$COMMIT_MSG" | grep -qE '^merge:'; then
+    exit 0
+fi
+
+# Allow release and hotfix tags
+if echo "$COMMIT_MSG" | grep -qE '^(release|hotfix):'; then
+    exit 0
+fi
+
+# Conventional Commit Pattern
+PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_-]+\))?: .{1,100}$"
+
+if ! echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
+    echo "❌ [Git Hook Error] Invalid commit message format!"
+    echo "👉 Found: \"$COMMIT_MSG\""
+    echo ""
+    echo "📌 Commit messages must follow Conventional Commits:"
+    echo "   <type>(<scope>): <subject>"
+    echo ""
+    echo "   Examples:"
+    echo "     feat(auth): implement Google OAuth handler"
+    echo "     fix(payment): resolve signature verification issue"
+    echo "     chore(deps): bump vite from 5.0 to 5.4"
+    echo "     hotfix: v1.0.1 emergency patch"
+    echo "     release: v1.1.0 production release"
+    exit 1
+fi
+
+exit 0

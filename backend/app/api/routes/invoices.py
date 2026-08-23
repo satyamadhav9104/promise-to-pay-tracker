@@ -141,7 +141,7 @@ def list_invoices(
     """Lists invoices with optional status and user_id multi-tenancy filter."""
     query = db.query(Invoice)
     if x_user_id:
-        query = query.filter(Invoice.user_id == x_user_id)
+        query = query.filter((Invoice.user_id == x_user_id) | (Invoice.user_id.is_(None)) | (Invoice.user_id == ""))
     if status:
         query = query.filter(Invoice.status == status)
     return query.order_by(Invoice.due_date.asc()).offset(offset).limit(limit).all()
@@ -149,11 +149,18 @@ def list_invoices(
 
 
 @router.get("/metrics/summary", response_model=MetricsResponse)
-def get_metrics(db: Session = Depends(get_db)):
+def get_metrics(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    db: Session = Depends(get_db)
+):
     """
     FR30: Computes summary recovery metrics across the invoice batch.
     """
-    total_invoices = db.query(Invoice).count()
+    query = db.query(Invoice)
+    if x_user_id:
+        query = query.filter((Invoice.user_id == x_user_id) | (Invoice.user_id.is_(None)) | (Invoice.user_id == ""))
+
+    total_invoices = query.count()
     if total_invoices == 0:
         return MetricsResponse(
             total_invoices=0,
@@ -166,24 +173,21 @@ def get_metrics(db: Session = Depends(get_db)):
             human_escalations_count=0
         )
 
-    total_amount = db.query(func.sum(Invoice.amount)).scalar() or 0.0
-    paid_invoices = db.query(Invoice).filter(Invoice.status == InvoiceStatus.PAID).all()
+    total_amount = db.query(func.sum(Invoice.amount)).filter(
+        (Invoice.user_id == x_user_id) | (Invoice.user_id.is_(None)) | (Invoice.user_id == "") if x_user_id else True
+    ).scalar() or 0.0
+
+    paid_invoices = query.filter(Invoice.status == InvoiceStatus.PAID).all()
     total_recovered_amount = sum(inv.amount for inv in paid_invoices)
     recovery_rate = (total_recovered_amount / total_amount * 100.0) if total_amount > 0 else 0.0
 
     # Calculate average days to recovery for paid invoices
     days_list = []
     for inv in paid_invoices:
-        # Find payment action log
         paid_log = db.query(ActionLog).filter(
             ActionLog.invoice_id == inv.id,
-            ActionLog.action_taken == "status_changed:pending_verification->paid"
+            ActionLog.action_taken.like("%->paid%")
         ).first()
-        if not paid_log:
-            paid_log = db.query(ActionLog).filter(
-                ActionLog.invoice_id == inv.id,
-                ActionLog.action_taken.like("%->paid%")
-            ).first()
 
         if paid_log and paid_log.timestamp:
             days = (paid_log.timestamp - inv.created_date).total_seconds() / 86400.0
@@ -191,9 +195,10 @@ def get_metrics(db: Session = Depends(get_db)):
 
     avg_days = sum(days_list) / len(days_list) if days_list else 0.0
 
-    promises_kept = db.query(Promise).filter(Promise.status == PromiseStatus.KEPT).count()
-    promises_broken = db.query(Promise).filter(Promise.status == PromiseStatus.BROKEN).count()
-    human_escalations = db.query(Invoice).filter(Invoice.status == InvoiceStatus.ESCALATED).count()
+    user_inv_ids = [inv.id for inv in query.all()]
+    promises_kept = db.query(Promise).filter(Promise.invoice_id.in_(user_inv_ids), Promise.status == PromiseStatus.KEPT).count() if user_inv_ids else 0
+    promises_broken = db.query(Promise).filter(Promise.invoice_id.in_(user_inv_ids), Promise.status == PromiseStatus.BROKEN).count() if user_inv_ids else 0
+    human_escalations = query.filter(Invoice.status == InvoiceStatus.ESCALATED).count()
 
     return MetricsResponse(
         total_invoices=total_invoices,

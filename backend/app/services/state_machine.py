@@ -15,12 +15,16 @@ ALLOWED_TRANSITIONS: dict[InvoiceStatus, Set[InvoiceStatus]] = {
     InvoiceStatus.CREATED: {
         InvoiceStatus.DUE_SOON,
         InvoiceStatus.OVERDUE,
+        InvoiceStatus.PROMISE_MADE,
+        InvoiceStatus.PENDING_VERIFICATION,
+        InvoiceStatus.ESCALATED,
         InvoiceStatus.PAID,
     },
     InvoiceStatus.DUE_SOON: {
         InvoiceStatus.OVERDUE,
         InvoiceStatus.PROMISE_MADE,
         InvoiceStatus.PENDING_VERIFICATION,
+        InvoiceStatus.ESCALATED,
         InvoiceStatus.PAID,
     },
     InvoiceStatus.OVERDUE: {
@@ -35,21 +39,27 @@ ALLOWED_TRANSITIONS: dict[InvoiceStatus, Set[InvoiceStatus]] = {
         InvoiceStatus.PENDING_VERIFICATION,
         InvoiceStatus.PAID,
         InvoiceStatus.ESCALATED,
+        InvoiceStatus.OVERDUE,
     },
     InvoiceStatus.PROMISE_DUE: {
+        InvoiceStatus.PROMISE_MADE,
         InvoiceStatus.PENDING_VERIFICATION,
         InvoiceStatus.ESCALATED,
+        InvoiceStatus.OVERDUE,
         InvoiceStatus.PAID,
     },
     InvoiceStatus.PENDING_VERIFICATION: {
         InvoiceStatus.PAID,
         InvoiceStatus.ESCALATED,
         InvoiceStatus.OVERDUE,
+        InvoiceStatus.PROMISE_MADE,
     },
     InvoiceStatus.ESCALATED: {
+        InvoiceStatus.PROMISE_MADE,
         InvoiceStatus.PENDING_VERIFICATION,
         InvoiceStatus.PAID,
         InvoiceStatus.WRITTEN_OFF,
+        InvoiceStatus.OVERDUE,
     },
     # Terminal states have no outbound transitions
     InvoiceStatus.PAID: set(),

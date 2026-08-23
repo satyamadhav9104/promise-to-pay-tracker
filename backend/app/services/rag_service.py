@@ -75,7 +75,7 @@ def call_gemini_llm(prompt: str, system_instruction: str = "") -> str:
     if not settings.llm_api_key:
         return ""
 
-    models_to_try = ["gemini-flash-latest", "gemini-3.6-flash"]
+    models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-flash-latest"]
     full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
 
     for model in models_to_try:
@@ -84,7 +84,7 @@ def call_gemini_llm(prompt: str, system_instruction: str = "") -> str:
             res = httpx.post(
                 url,
                 json={"contents": [{"parts": [{"text": full_prompt}]}]},
-                timeout=4.0
+                timeout=10.0
             )
             if res.status_code == 200:
                 data = res.json()

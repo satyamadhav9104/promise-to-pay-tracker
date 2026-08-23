@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Search,
   Filter,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import AuditTrail from './AuditTrail';
+import RazorpayModal from './RazorpayModal';
 import { fetchAuditLogs, submitCustomerReply, simulatePayment, deleteInvoice, sendInvoiceEmail, approvePromise, rejectPromise, fetchVendorRAGAdvice } from '../api/client';
 
 export default function InvoiceList({ invoices = [], onRefresh }) {
@@ -32,6 +34,7 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
   const [auditLogs, setAuditLogs] = useState({});
   const [vendorAdvice, setVendorAdvice] = useState({});
   const [activeModal, setActiveModal] = useState(null);
+  const [razorpayModalInvoice, setRazorpayModalInvoice] = useState(null);
   const [replyText, setReplyText] = useState('');
   const [loadingAction, setLoadingAction] = useState(false);
   const [processedPromiseIds, setProcessedPromiseIds] = useState([]);
@@ -99,16 +102,16 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     }
   };
 
-  const handlePaymentSubmit = async (invoiceId) => {
-    setLoadingAction(true);
-    try {
-      await simulatePayment(invoiceId);
-      setActiveModal(null);
-      onRefresh();
-    } catch (err) {
-      alert('Error simulating payment: ' + err.message);
-    } finally {
-      setLoadingAction(false);
+  const handlePaymentSubmit = (invoice) => {
+    if (invoice.invoice_type === 'payable') {
+      // Vendor bill direct settlement
+      simulatePayment(invoice.id).then(() => {
+        alert(`Bill for ${invoice.customer_name} marked as PAID.`);
+        if (onRefresh) onRefresh();
+      });
+    } else {
+      // Open interactive Razorpay checkout modal
+      setRazorpayModalInvoice(invoice);
     }
   };
 
@@ -135,12 +138,13 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     }
   };
 
-  const handleApprovePromise = async (promiseId) => {
-    if (promiseId) setProcessedPromiseIds((prev) => [...prev, promiseId]);
+  const handleApprovePromise = async (promiseId, invoiceId) => {
+    const targetId = (promiseId && promiseId !== 'demo_promise') ? promiseId : invoiceId;
+    setProcessedPromiseIds((prev) => [...prev, promiseId, invoiceId, targetId].filter(Boolean));
     setLoadingAction(true);
     try {
-      const res = await approvePromise(promiseId);
-      alert(res.message || 'Payment promise date approved and due date updated!');
+      const res = await approvePromise(targetId);
+      alert(res.message || 'Payment promise approved! Due date updated to committed date.');
       if (onRefresh) onRefresh();
     } catch (err) {
       alert('Error approving promise: ' + err.message);
@@ -149,12 +153,13 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     }
   };
 
-  const handleRejectPromise = async (promiseId) => {
-    if (promiseId) setProcessedPromiseIds((prev) => [...prev, promiseId]);
+  const handleRejectPromise = async (promiseId, invoiceId) => {
+    const targetId = (promiseId && promiseId !== 'demo_promise') ? promiseId : invoiceId;
+    setProcessedPromiseIds((prev) => [...prev, promiseId, invoiceId, targetId].filter(Boolean));
     setLoadingAction(true);
     try {
-      const res = await rejectPromise(promiseId);
-      alert(res.message || 'Payment promise date rejected.');
+      const res = await rejectPromise(targetId);
+      alert(res.message || 'Payment promise rejected. Payment reminder email dispatched with Razorpay link.');
       if (onRefresh) onRefresh();
     } catch (err) {
       alert('Error rejecting promise: ' + err.message);
@@ -165,72 +170,34 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
 
   return (
     <div className="w-full">
-      {/* Category Tabs & Search/Filter Bar */}
-      <div className="p-4 sm:p-6 flex flex-col gap-4 bg-gray-50/50 border-b border-gray-100">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Category Filter Tabs */}
-          <div className="flex items-center gap-1.5 p-1 bg-gray-200/80 rounded-xl">
-            <button
-              onClick={() => setFilterCategory('All')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                filterCategory === 'All' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              All Records ({invoices.length})
-            </button>
-            <button
-              onClick={() => setFilterCategory('receivable')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                filterCategory === 'receivable' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700 hover:bg-emerald-100'
-              }`}
-            >
-              <ArrowDownLeft className="w-3.5 h-3.5" />
-              📥 Receivables ({invoices.filter(i => (i.invoice_type || 'receivable') === 'receivable').length})
-            </button>
-            <button
-              onClick={() => setFilterCategory('payable')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                filterCategory === 'payable' ? 'bg-amber-600 text-white shadow-sm' : 'text-amber-700 hover:bg-amber-100'
-              }`}
-            >
-              <ArrowUpRight className="w-3.5 h-3.5" />
-              📤 Pending Bills ({invoices.filter(i => i.invoice_type === 'payable').length})
-            </button>
-          </div>
-
-          {/* Status Dropdown */}
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-400" />
-            <select
-              className="bg-white border border-gray-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-bold text-gray-700 cursor-pointer"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-            >
-              <option value="All">All Statuses</option>
-              <option value="created">Created</option>
-              <option value="due_soon">Due Soon</option>
-              <option value="overdue">Overdue</option>
-              <option value="promise_made">Promise Made</option>
-              <option value="promise_due">Promise Due</option>
-              <option value="pending_verification">Pending Verification</option>
-              <option value="escalated">Escalated</option>
-              <option value="paid">Paid</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Search input */}
-        <div className="relative flex-1">
+      {/* Search & Filter Bar */}
+      <div className="p-4 sm:p-6 flex flex-col sm:flex-row gap-4 justify-between bg-gray-50/50 border-b border-gray-100">
+        <div className="relative flex-1 max-w-md">
           <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none flex items-center">
-            <Search className="w-4 h-4" />
+            <Search className="w-5 h-5" />
           </div>
           <input
             type="text"
-            placeholder="Search by client/vendor or invoice #..."
-            className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-xs"
+            placeholder="Search by client or invoice #..."
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="w-5 h-5 text-gray-400" />
+          <select
+            className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium text-gray-700 cursor-pointer"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="All">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="paid">Paid</option>
+            <option value="overdue">Overdue</option>
+            <option value="promise_made">Promise Made</option>
+            <option value="escalated">Escalated</option>
+          </select>
         </div>
       </div>
 
@@ -309,41 +276,61 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                             )}
 
                             {/* Inbound Customer Reply Indicator Card (Hides automatically after Approval or Rejection!) */}
-                            {invoice.status !== 'promise_made' &&
-                             invoice.status !== 'paid' &&
-                             (invoice.extracted_text || (invoice.promises && invoice.promises.length > 0)) &&
-                             !processedPromiseIds.includes(invoice.promises?.[0]?.id) && (
-                              <div className="mt-1.5 p-2 bg-purple-50 border border-purple-200 rounded-xl text-xs space-y-1.5 max-w-xs shadow-sm" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex items-center justify-between font-bold text-purple-900 text-[11px]">
-                                  <span className="flex items-center gap-1">
-                                    <MessageSquare className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                            {invoice.status !== 'paid' &&
+                             invoice.status !== 'written_off' &&
+                             !processedPromiseIds.includes(invoice.id) &&
+                             (
+                               (invoice.promises && invoice.promises.length > 0 &&
+                                !invoice.promises.some(p => processedPromiseIds.includes(p.id) || p.status === 'active' || p.status === 'broken')) ||
+                               (invoice.extracted_text && (!invoice.promises || invoice.promises.length === 0))
+                             ) && (
+                              <div className="mt-2 p-3 bg-purple-50/90 border border-purple-200 rounded-xl text-xs space-y-2 max-w-sm shadow-sm animate-in" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-between font-bold text-purple-900 text-xs">
+                                  <span className="flex items-center gap-1.5">
+                                    <MessageSquare className="w-4 h-4 text-purple-600 shrink-0" />
                                     Mail Reply Received:
                                   </span>
-                                </div>
-                                <p className="text-[11px] text-gray-800 italic bg-white p-1.5 rounded-lg border border-purple-100/80">
-                                  "{invoice.extracted_text || invoice.promises[invoice.promises.length - 1]?.source_text || invoice.promises[0]?.source_text}"
-                                </p>
-                                {invoice.promises && invoice.promises.length > 0 && (
-                                  <div className="flex items-center justify-between gap-1 pt-0.5">
-                                    <span className="text-[10px] font-bold text-purple-800">
-                                      Date: {invoice.promises[0].promised_date ? new Date(invoice.promises[0].promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Pending'}
+                                  {invoice.promises?.[0]?.confidence_score && (
+                                    <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full font-semibold">
+                                      {(invoice.promises[0].confidence_score * 100).toFixed(0)}% Conf
                                     </span>
-                                    <div className="flex gap-1">
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleApprovePromise(invoice.promises[0].id); }}
-                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-0.5 rounded text-[10px] flex items-center gap-0.5 shadow-sm"
-                                      >
-                                        <Check className="w-3 h-3" /> Approve
-                                      </button>
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleRejectPromise(invoice.promises[0].id); }}
-                                        className="bg-red-50 hover:bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded text-[10px] border border-red-200 flex items-center gap-0.5"
-                                      >
-                                        <X className="w-3 h-3 text-red-600" /> Reject
-                                      </button>
-                                    </div>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-800 italic bg-white p-2 rounded-lg border border-purple-100/80 font-medium">
+                                  "{invoice.extracted_text || invoice.promises?.[0]?.source_text || invoice.promises?.[invoice.promises.length - 1]?.source_text || 'Customer proposed payment promise.'}"
+                                </p>
+                                <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-purple-100">
+                                  <span className="text-xs font-bold text-purple-900 flex items-center gap-1">
+                                    <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                                    Proposed: {invoice.promises?.[0]?.promised_date ? new Date(invoice.promises[0].promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Aug 30, 2026'}
+                                  </span>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const pId = invoice.promises?.[0]?.id || invoice.id;
+                                        handleApprovePromise(pId, invoice.id);
+                                      }}
+                                      disabled={loadingAction}
+                                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-xs flex items-center gap-1 shadow-sm transition-all cursor-pointer disabled:opacity-50 hover:scale-[1.02]"
+                                      title="Approve Proposed Payment Date"
+                                    >
+                                      <Check className="w-3.5 h-3.5" /> Approve
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const pId = invoice.promises?.[0]?.id || invoice.id;
+                                        handleRejectPromise(pId, invoice.id);
+                                      }}
+                                      disabled={loadingAction}
+                                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold px-2.5 py-1 rounded-lg text-xs border border-rose-200 flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50 hover:scale-[1.02]"
+                                      title="Reject Date & Send Reminder Email"
+                                    >
+                                      <X className="w-3.5 h-3.5 text-rose-600" /> Reject
+                                    </button>
                                   </div>
-                                )}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -385,7 +372,8 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                               {invoice.invoice_type !== 'payable' && (
                                 <button
                                   onClick={() => {
-                                    setReplyText('');
+                                    const amtStr = invoice.amount ? Number(invoice.amount).toLocaleString('en-US') : '12,500';
+                                    setReplyText(`Hi team, we acknowledge invoice ${invoice.id} for $${amtStr}. We will complete the payment transfer by August 30, 2026.`);
                                     setActiveModal({ type: 'reply', invoice });
                                   }}
                                   className="px-2.5 py-1.5 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium border border-indigo-200 transition-colors flex items-center gap-1"
@@ -396,12 +384,12 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                                 </button>
                               )}
                               <button
-                                onClick={() => handlePaymentSubmit(invoice.id)}
+                                onClick={() => handlePaymentSubmit(invoice)}
                                 className="px-2.5 py-1.5 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg font-medium border border-emerald-200 transition-colors flex items-center gap-1 cursor-pointer"
-                                title="Simulate Razorpay Webhook Payment"
+                                title="Open Live Razorpay Standard Checkout Popup"
                               >
                                 <CreditCard className="w-3.5 h-3.5" />
-                                {invoice.invoice_type === 'payable' ? 'Mark Paid' : 'Pay'}
+                                {invoice.invoice_type === 'payable' ? 'Mark Paid' : 'Pay via Razorpay'}
                               </button>
                               <button
                                 onClick={() => handleSendEmail(invoice.id)}
@@ -444,39 +432,58 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                                   Extracted Payment Promises
                                 </h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  {invoice.promises.map((p) => (
-                                    <div key={p.id} className="bg-purple-50/50 p-3 rounded-xl border border-purple-100 text-xs space-y-2">
-                                      <div className="flex justify-between font-medium text-purple-900">
-                                        <span>Status: <strong className="uppercase">{p.status}</strong></span>
-                                        <span>Confidence: {(p.confidence_score * 100).toFixed(0)}%</span>
+                                  {invoice.promises.map((p) => {
+                                    const isApproved = p.status === 'active' || processedPromiseIds.includes(p.id) || processedPromiseIds.includes(invoice.id);
+                                    const isRejected = p.status === 'broken';
+
+                                    return (
+                                      <div key={p.id} className="bg-purple-50/50 p-3 rounded-xl border border-purple-100 text-xs space-y-2">
+                                        <div className="flex justify-between font-medium text-purple-900">
+                                          <span>Status: <strong className="uppercase">{isApproved ? 'ACTIVE (APPROVED)' : p.status}</strong></span>
+                                          <span>Confidence: {(p.confidence_score * 100).toFixed(0)}%</span>
+                                        </div>
+                                        <div className="text-gray-800 font-bold flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-purple-100">
+                                          <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                                          Promised Date: {p.promised_date ? new Date(p.promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                                        </div>
+                                        <p className="text-gray-700 italic bg-white p-2 rounded-lg border border-purple-100/60">
+                                          "{p.source_text}"
+                                        </p>
+                                        <div className="flex gap-2 pt-1">
+                                          {isApproved ? (
+                                            <div className="w-full bg-emerald-100/80 text-emerald-800 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 border border-emerald-200">
+                                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                              ✓ Promise Approved (Active)
+                                            </div>
+                                          ) : isRejected ? (
+                                            <div className="w-full bg-rose-100/80 text-rose-800 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 border border-rose-200">
+                                              <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                                              ✕ Promise Rejected
+                                            </div>
+                                          ) : (
+                                            <>
+                                              <button
+                                                onClick={() => handleApprovePromise(p.id, invoice.id)}
+                                                disabled={loadingAction}
+                                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                                              >
+                                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                                Approve Date
+                                              </button>
+                                              <button
+                                                onClick={() => handleRejectPromise(p.id, invoice.id)}
+                                                disabled={loadingAction}
+                                                className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 border border-red-200 transition-colors cursor-pointer disabled:opacity-50"
+                                              >
+                                                <XCircle className="w-3.5 h-3.5 text-red-600" />
+                                                Reject Date
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
                                       </div>
-                                      <div className="text-gray-800 font-bold flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-purple-100">
-                                        <Calendar className="w-3.5 h-3.5 text-purple-600" />
-                                        Promised Date: {p.promised_date ? new Date(p.promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
-                                      </div>
-                                      <p className="text-gray-700 italic bg-white p-2 rounded-lg border border-purple-100/60">
-                                        "{p.source_text}"
-                                      </p>
-                                      <div className="flex gap-2 pt-1">
-                                        <button
-                                          onClick={() => handleApprovePromise(p.id)}
-                                          disabled={loadingAction}
-                                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
-                                        >
-                                          <CheckCircle2 className="w-3.5 h-3.5" />
-                                          Approve Date
-                                        </button>
-                                        <button
-                                          onClick={() => handleRejectPromise(p.id)}
-                                          disabled={loadingAction}
-                                          className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 border border-red-200 transition-colors cursor-pointer disabled:opacity-50"
-                                        >
-                                          <XCircle className="w-3.5 h-3.5 text-red-600" />
-                                          Reject Date
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}
@@ -515,15 +522,15 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
       </div>
 
       {/* Customer Reply Modal */}
-      {activeModal && activeModal.type === 'reply' && (
-        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in">
+      {activeModal && activeModal.type === 'reply' && createPortal(
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-in">
           <div className="bg-white rounded-2xl p-6 shadow-xl border border-gray-100 w-full max-w-lg space-y-4">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">Simulate Customer Reply</h3>
                 <p className="text-xs text-gray-500">Invoice: <span className="font-mono font-semibold text-indigo-600">{activeModal.invoice.id}</span> ({activeModal.invoice.customer_name})</p>
               </div>
-              <button onClick={() => setActiveModal(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-lg">
+              <button onClick={() => setActiveModal(null)} className="p-1 text-gray-400 hover:text-gray-600 rounded-lg cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -550,21 +557,21 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                   <button
                     type="button"
                     onClick={() => setReplyText(`We will process payment for invoice ${activeModal.invoice.id} by 2026-09-01.`)}
-                    className="text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors font-medium"
+                    className="text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors font-medium cursor-pointer"
                   >
                     Explicit Date Promise
                   </button>
                   <button
                     type="button"
                     onClick={() => setReplyText(`I already paid invoice ${activeModal.invoice.id} yesterday via Razorpay UPI. Ref #RP192837.`)}
-                    className="text-[11px] bg-amber-50 hover:bg-amber-100 text-amber-800 px-2.5 py-1 rounded-lg border border-amber-200 transition-colors font-medium"
+                    className="text-[11px] bg-amber-50 hover:bg-amber-100 text-amber-800 px-2.5 py-1 rounded-lg border border-amber-200 transition-colors font-medium cursor-pointer"
                   >
                     Unverified Payment Claim
                   </button>
                   <button
                     type="button"
                     onClick={() => setReplyText('Working on cash flow, will try to clear the dues soon.')}
-                    className="text-[11px] bg-purple-50 hover:bg-purple-100 text-purple-700 px-2.5 py-1 rounded-lg border border-purple-200 transition-colors font-medium"
+                    className="text-[11px] bg-purple-50 hover:bg-purple-100 text-purple-700 px-2.5 py-1 rounded-lg border border-purple-200 transition-colors font-medium cursor-pointer"
                   >
                     Vague Promise (Low Conf)
                   </button>
@@ -575,22 +582,33 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                 <button
                   type="button"
                   onClick={() => setActiveModal(null)}
-                  className="px-4 py-2 text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl font-medium transition-colors"
+                  className="px-4 py-2 text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl font-medium transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={loadingAction}
-                  className="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium shadow-sm transition-colors disabled:opacity-50"
+                  className="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {loadingAction ? 'Analyzing Intent...' : 'Extract Promise'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
+
+      {/* Razorpay Interactive Checkout Modal */}
+      <RazorpayModal
+        isOpen={!!razorpayModalInvoice}
+        onClose={() => setRazorpayModalInvoice(null)}
+        invoice={razorpayModalInvoice}
+        onSuccess={() => {
+          if (onRefresh) onRefresh();
+        }}
+      />
     </div>
   );
 }

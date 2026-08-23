@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, PlusCircle, DollarSign, Calendar, User, Hash, Upload, FileText, CheckCircle2, Sparkles, AlertCircle, Mail, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { createInvoice } from '../api/client';
 
@@ -123,8 +124,8 @@ export default function CreateInvoiceModal({ isOpen, onClose, onSuccess }) {
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 animate-in">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 animate-in">
       <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md flex flex-col overflow-hidden my-auto">
         {/* Modal Header */}
         <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/90 shrink-0">
@@ -358,6 +359,7 @@ export default function CreateInvoiceModal({ isOpen, onClose, onSuccess }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

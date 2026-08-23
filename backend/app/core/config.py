@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     # Free Resend API configuration (3,000 free emails/month)
     resend_api_key: str = ""
+    default_recipient_email: str = "satyamaadhav@gmail.com"
 
     # Free Email (Gmail SMTP / Custom SMTP) configuration
     smtp_server: str = "smtp.gmail.com"

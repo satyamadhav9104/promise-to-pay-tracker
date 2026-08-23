@@ -78,6 +78,8 @@ def send_notification(
     Dispatches via Resend API or SMTP if configured. Otherwise logs simulated delivery.
     """
     to_email = recipient_email or f"{customer_name.lower().replace(' ', '.')}@example.com"
+    if not to_email or "@example.com" in to_email.lower():
+        to_email = getattr(settings, 'default_recipient_email', None) or "satyamaadhav@gmail.com"
     payment_link = f"https://rzp.io/l/pay_{customer_name.lower().replace(' ', '')}_inv"
 
     if channel == Channel.EMAIL:

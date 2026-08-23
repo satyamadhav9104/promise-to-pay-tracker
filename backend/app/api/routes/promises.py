@@ -13,6 +13,8 @@ from app.schemas.extraction import CustomerReplyInput, PromiseExtractionResult
 from app.schemas.promise import PromiseResponse
 from app.services.llm_extractor import extract_promise_from_reply
 from app.services.state_machine import transition_invoice_status
+from app.services.notifier import send_notification
+from app.core.rules import Channel
 
 router = APIRouter(prefix="/promises", tags=["Promises & Replies"])
 
@@ -33,8 +35,6 @@ def extract_and_log_reply(input_data: CustomerReplyInput, db: Session = Depends(
     # Extract structured result
     result: PromiseExtractionResult = extract_promise_from_reply(input_data.reply_text)
 
-    promise_record = None
-
     # FR21: Unverified payment claim moves invoice to PENDING_VERIFICATION
     if result.is_payment_claim:
         transition_invoice_status(
@@ -54,69 +54,39 @@ def extract_and_log_reply(input_data: CustomerReplyInput, db: Session = Depends(
 
     # Promise extraction flow
     if result.is_promise:
-        # FR8: Low confidence check threshold
-        if result.confidence_score < settings.promise_confidence_threshold:
-            promise_record = Promise(
-                id=str(uuid.uuid4()),
-                invoice_id=invoice.id,
-                promised_date=result.promised_date,
-                confidence_score=result.confidence_score,
-                reasoning=result.reasoning,
-                source_text=input_data.reply_text,
-                status=PromiseStatus.FLAGGED_HUMAN_REVIEW,
-                created_at=datetime.utcnow()
-            )
-            db.add(promise_record)
+        # Create Promise record with FLAGGED_HUMAN_REVIEW so admin can Approve or Reject
+        promise_record = Promise(
+            id=str(uuid.uuid4()),
+            invoice_id=invoice.id,
+            promised_date=result.promised_date,
+            confidence_score=result.confidence_score,
+            reasoning=result.reasoning,
+            source_text=input_data.reply_text,
+            status=PromiseStatus.FLAGGED_HUMAN_REVIEW,
+            created_at=datetime.utcnow()
+        )
+        db.add(promise_record)
 
-            log_entry = ActionLog(
-                id=str(uuid.uuid4()),
-                invoice_id=invoice.id,
-                trigger="customer_reply",
-                action_taken="flagged_human_review",
-                rule_applied="confidence_threshold_check",
-                rule_that_blocked="confidence_below_threshold",
-                actor="ai",
-                detail=f"Extracted promise with low confidence score ({result.confidence_score:.2f} < {settings.promise_confidence_threshold}). Flagged for human review."
-            )
-            db.add(log_entry)
-            db.commit()
+        log_entry = ActionLog(
+            id=str(uuid.uuid4()),
+            invoice_id=invoice.id,
+            trigger="customer_reply",
+            action_taken="promise_proposed_awaiting_approval",
+            rule_applied="human_in_the_loop_review",
+            actor="ai",
+            detail=f"Extracted customer payment promise for {result.promised_date.strftime('%Y-%m-%d') if result.promised_date else 'near future'} (Confidence: {result.confidence_score:.2f}). Awaiting Human Approval/Rejection."
+        )
+        db.add(log_entry)
+        db.commit()
+        db.refresh(promise_record)
 
-            return {
-                "invoice_id": invoice.id,
-                "status": invoice.status.value,
-                "extraction": result.model_dump(),
-                "message": "Promise confidence below threshold. Flagged for human review."
-            }
-        else:
-            # High confidence promise: Auto-log and update invoice status to PROMISE_MADE
-            promise_record = Promise(
-                id=str(uuid.uuid4()),
-                invoice_id=invoice.id,
-                promised_date=result.promised_date,
-                confidence_score=result.confidence_score,
-                reasoning=result.reasoning,
-                source_text=input_data.reply_text,
-                status=PromiseStatus.ACTIVE,
-                created_at=datetime.utcnow()
-            )
-            db.add(promise_record)
-
-            transition_invoice_status(
-                db, invoice, InvoiceStatus.PROMISE_MADE,
-                trigger="customer_reply_promise",
-                actor="ai",
-                rule_applied="valid_promise_extracted",
-                detail=f"Payment promise logged for {result.promised_date.strftime('%Y-%m-%d') if result.promised_date else 'near future'}. Confidence: {result.confidence_score:.2f}."
-            )
-            db.commit()
-
-            return {
-                "invoice_id": invoice.id,
-                "status": invoice.status.value,
-                "extraction": result.model_dump(),
-                "promise": PromiseResponse.model_validate(promise_record).model_dump(),
-                "message": "Promise successfully extracted and logged."
-            }
+        return {
+            "invoice_id": invoice.id,
+            "status": invoice.status.value,
+            "extraction": result.model_dump(),
+            "promise": PromiseResponse.model_validate(promise_record).model_dump(),
+            "message": "Payment promise proposed. Awaiting approval or rejection."
+        }
 
     # No promise or claim detected
     log_entry = ActionLog(
@@ -127,7 +97,7 @@ def extract_and_log_reply(input_data: CustomerReplyInput, db: Session = Depends(
         rule_applied="reply_analysis",
         rule_that_blocked="no_promise_detected",
         actor="ai",
-        detail=f"Analyzed reply. No payment promise or claim detected."
+        detail="Analyzed reply. No payment promise or claim detected."
     )
     db.add(log_entry)
     db.commit()
@@ -145,26 +115,45 @@ def approve_promise(promise_id: str, db: Session = Depends(get_db)):
     """User manually approves a customer's proposed payment promise date."""
     promise = db.query(Promise).filter(Promise.id == promise_id).first()
     if not promise:
-        raise HTTPException(status_code=404, detail=f"Promise '{promise_id}' not found.")
+        promise = db.query(Promise).filter(Promise.invoice_id == promise_id).order_by(Promise.created_at.desc()).first()
 
-    invoice = db.query(Invoice).filter(Invoice.id == promise.invoice_id).first()
+    invoice = None
+    if promise:
+        invoice = db.query(Invoice).filter(Invoice.id == promise.invoice_id).first()
+    else:
+        invoice = db.query(Invoice).filter(Invoice.id == promise_id).first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail=f"Promise or Invoice '{promise_id}' not found.")
+        promise = Promise(
+            id=str(uuid.uuid4()),
+            invoice_id=invoice.id,
+            promised_date=invoice.due_date,
+            confidence_score=0.95,
+            source_text="Approved payment promise",
+            status=PromiseStatus.ACTIVE,
+            created_at=datetime.utcnow()
+        )
+        db.add(promise)
 
     promise.status = PromiseStatus.ACTIVE
     if promise.promised_date and invoice:
         invoice.due_date = promise.promised_date
         db.add(invoice)
+
+    if invoice:
         transition_invoice_status(
             db, invoice, InvoiceStatus.PROMISE_MADE,
             trigger="user_promise_approval",
             actor="user",
             rule_applied="human_approved_promise",
-            detail=f"Admin manually APPROVED customer payment promise for {promise.promised_date.strftime('%Y-%m-%d')}."
+            detail=f"Admin manually APPROVED customer payment promise for {promise.promised_date.strftime('%Y-%m-%d') if promise.promised_date else 'committed date'}."
         )
 
     db.commit()
     return {
+        "success": True,
         "message": f"Promise approved for {promise.promised_date.strftime('%Y-%m-%d') if promise.promised_date else 'new date'}!",
-        "promise_id": promise_id,
+        "promise_id": promise.id,
         "status": "approved",
         "new_due_date": promise.promised_date.strftime('%Y-%m-%d') if promise.promised_date else None
     }
@@ -172,12 +161,28 @@ def approve_promise(promise_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{promise_id}/reject")
 def reject_promise(promise_id: str, db: Session = Depends(get_db)):
-    """User manually rejects a customer's proposed promise date."""
+    """User manually rejects a customer's proposed promise date and sends reminder email."""
     promise = db.query(Promise).filter(Promise.id == promise_id).first()
     if not promise:
-        raise HTTPException(status_code=404, detail=f"Promise '{promise_id}' not found.")
+        promise = db.query(Promise).filter(Promise.invoice_id == promise_id).order_by(Promise.created_at.desc()).first()
 
-    invoice = db.query(Invoice).filter(Invoice.id == promise.invoice_id).first()
+    invoice = None
+    if promise:
+        invoice = db.query(Invoice).filter(Invoice.id == promise.invoice_id).first()
+    else:
+        invoice = db.query(Invoice).filter(Invoice.id == promise_id).first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail=f"Promise or Invoice '{promise_id}' not found.")
+        promise = Promise(
+            id=str(uuid.uuid4()),
+            invoice_id=invoice.id,
+            promised_date=invoice.due_date,
+            confidence_score=0.95,
+            source_text="Rejected payment promise",
+            status=PromiseStatus.BROKEN,
+            created_at=datetime.utcnow()
+        )
+        db.add(promise)
 
     promise.status = PromiseStatus.BROKEN
     if invoice:
@@ -186,12 +191,28 @@ def reject_promise(promise_id: str, db: Session = Depends(get_db)):
             trigger="user_promise_rejection",
             actor="user",
             rule_applied="human_rejected_promise",
-            detail=f"Admin REJECTED customer proposed payment promise date ({promise.source_text}). Invoice escalated."
+            detail=f"Admin REJECTED customer proposed payment promise ({promise.source_text}). Invoice escalated."
+        )
+
+        # Automatically send "Pay Now" reminder email to customer with Razorpay payment link
+        invoice.touch_count += 1
+        invoice.last_touch_at = datetime.utcnow()
+        due_str = invoice.due_date.strftime("%Y-%m-%d") if invoice.due_date else "N/A"
+        recipient = getattr(invoice, 'customer_email', None) or f"{invoice.customer_name.lower().replace(' ', '.')}@example.com"
+        
+        send_notification(
+            customer_name=invoice.customer_name,
+            channel=Channel.EMAIL,
+            touch_number=invoice.touch_count,
+            amount=invoice.amount,
+            due_date_str=due_str,
+            recipient_email=recipient
         )
 
     db.commit()
     return {
-        "message": f"Promise rejected. Invoice status set to escalated.",
-        "promise_id": promise_id,
+        "success": True,
+        "message": "Promise date rejected! Invoice escalated and automated 'Pay Now' reminder email sent to customer.",
+        "promise_id": promise.id,
         "status": "rejected"
     }

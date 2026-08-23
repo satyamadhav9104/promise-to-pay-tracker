@@ -20,83 +20,83 @@ param (
 
 switch ($Action) {
     "feature-start" {
-        if (-not $Name) { Write-Host "Error: Feature name required (e.g. login, payment, profile)" -ForegroundColor Red; exit 1 }
-        Write-Host "🚀 Starting feature branch 'feature/$Name' from develop..." -ForegroundColor Cyan
+        if (-not $Name) { Write-Host "[ERROR] Feature name required (e.g. login, payment, profile)" -ForegroundColor Red; exit 1 }
+        Write-Host "[*] Starting feature branch 'feature/$Name' from develop..." -ForegroundColor Cyan
         git checkout develop
         git pull origin develop
         git checkout -b "feature/$Name"
-        Write-Host "✅ Created branch feature/$Name. Happy coding!" -ForegroundColor Green
+        Write-Host "[SUCCESS] Created branch feature/$Name. Happy coding!" -ForegroundColor Green
     }
 
     "feature-finish" {
-        if (-not $Name) { Write-Host "Error: Feature name required (e.g. login, payment, profile)" -ForegroundColor Red; exit 1 }
-        Write-Host "🔀 Merging feature/$Name into develop..." -ForegroundColor Cyan
+        if (-not $Name) { Write-Host "[ERROR] Feature name required (e.g. login, payment, profile)" -ForegroundColor Red; exit 1 }
+        Write-Host "[*] Merging feature/$Name into develop..." -ForegroundColor Cyan
         git checkout develop
         git pull origin develop
         git merge --no-ff "feature/$Name" -m "merge: PR feature/$Name into develop"
-        Write-Host "✅ Merged feature/$Name into develop successfully." -ForegroundColor Green
+        Write-Host "[SUCCESS] Merged feature/$Name into develop successfully." -ForegroundColor Green
     }
 
     "release-start" {
-        if (-not $Name) { Write-Host "Error: Release version required (e.g. 1.2.0)" -ForegroundColor Red; exit 1 }
+        if (-not $Name) { Write-Host "[ERROR] Release version required (e.g. 1.2.0)" -ForegroundColor Red; exit 1 }
         $version = $Name.TrimStart("v")
-        Write-Host "📦 Cutting release branch 'release/v$version' from develop..." -ForegroundColor Cyan
+        Write-Host "[*] Cutting release branch 'release/v$version' from develop..." -ForegroundColor Cyan
         git checkout develop
         git pull origin develop
         git checkout -b "release/v$version"
-        Write-Host "✅ Created branch release/v$version for QA and version bumping." -ForegroundColor Green
+        Write-Host "[SUCCESS] Created branch release/v$version for QA and version bumping." -ForegroundColor Green
     }
 
     "release-finish" {
-        if (-not $Name) { Write-Host "Error: Release version required (e.g. 1.2.0)" -ForegroundColor Red; exit 1 }
+        if (-not $Name) { Write-Host "[ERROR] Release version required (e.g. 1.2.0)" -ForegroundColor Red; exit 1 }
         $version = $Name.TrimStart("v")
-        Write-Host "🚢 Finalizing release v$version into main and develop..." -ForegroundColor Cyan
+        Write-Host "[*] Finalizing release v$version into main and develop..." -ForegroundColor Cyan
         
         # Merge into main
         git checkout main
         git pull origin main
-        git merge --no-ff "release/v$version" -m "release: v$version — Production Release"
-        git tag -a "v$version" -m "Release v$version: Production deployment"
+        git merge --no-ff "release/v$version" -m "release: v$version -- Production Release"
+        git tag -a "v$version" -m "Release v${version} - Production deployment"
 
         # Sync back to develop
         git checkout develop
         git merge --no-ff "release/v$version" -m "merge: sync release v$version back to develop"
         
-        Write-Host "✅ Release v$version merged to main (tagged) and synced back to develop!" -ForegroundColor Green
+        Write-Host "[SUCCESS] Release v$version merged to main (tagged) and synced back to develop!" -ForegroundColor Green
     }
 
     "hotfix-start" {
-        if (-not $Name) { Write-Host "Error: Hotfix version required (e.g. 1.0.1)" -ForegroundColor Red; exit 1 }
+        if (-not $Name) { Write-Host "[ERROR] Hotfix version required (e.g. 1.0.1)" -ForegroundColor Red; exit 1 }
         $version = $Name.TrimStart("v")
-        Write-Host "🔥 Cutting hotfix branch 'hotfix/v$version' from main..." -ForegroundColor Cyan
+        Write-Host "[*] Cutting hotfix branch 'hotfix/v$version' from main..." -ForegroundColor Cyan
         git checkout main
         git pull origin main
         git checkout -b "hotfix/v$version"
-        Write-Host "✅ Created branch hotfix/v$version for urgent patch." -ForegroundColor Green
+        Write-Host "[SUCCESS] Created branch hotfix/v$version for urgent patch." -ForegroundColor Green
     }
 
     "hotfix-finish" {
-        if (-not $Name) { Write-Host "Error: Hotfix version required (e.g. 1.0.1)" -ForegroundColor Red; exit 1 }
+        if (-not $Name) { Write-Host "[ERROR] Hotfix version required (e.g. 1.0.1)" -ForegroundColor Red; exit 1 }
         $version = $Name.TrimStart("v")
-        Write-Host "🚒 Finalizing hotfix v$version into main and develop..." -ForegroundColor Cyan
+        Write-Host "[*] Finalizing hotfix v$version into main and develop..." -ForegroundColor Cyan
         
         # Merge into main
         git checkout main
         git merge --no-ff "hotfix/v$version" -m "hotfix: v$version emergency production patch"
-        git tag -a "v$version" -m "Hotfix v$version: Emergency production patch"
+        git tag -a "v$version" -m "Hotfix v${version} - Emergency production patch"
 
         # Sync back to develop
         git checkout develop
         git merge --no-ff "hotfix/v$version" -m "merge: sync hotfix v$version back to develop"
 
-        Write-Host "✅ Hotfix v$version merged to main (tagged) and synced back to develop!" -ForegroundColor Green
+        Write-Host "[SUCCESS] Hotfix v$version merged to main (tagged) and synced back to develop!" -ForegroundColor Green
     }
 
     "sync-develop" {
-        Write-Host "🔄 Synchronizing main into develop..." -ForegroundColor Cyan
+        Write-Host "[*] Synchronizing main into develop..." -ForegroundColor Cyan
         git checkout develop
         git merge --no-ff main -m "merge: sync latest main into develop"
-        Write-Host "✅ develop synchronized with main." -ForegroundColor Green
+        Write-Host "[SUCCESS] develop synchronized with main." -ForegroundColor Green
     }
 
     "status-graph" {

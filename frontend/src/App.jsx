@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, FileText, Activity, BarChart3, Settings, ShieldCheck, Key, ArrowLeft, Sparkles } from 'lucide-react';
+import { LayoutDashboard, FileText, Activity, BarChart3, Settings, ShieldCheck, Key, ArrowLeft, Sparkles, FileSpreadsheet, Bot } from 'lucide-react';
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton } from '@clerk/clerk-react';
 import Sidebar from './components/Sidebar';
 import LandingPage from './components/LandingPage';
@@ -9,6 +9,9 @@ import AuditPage from './pages/AuditPage';
 import MetricsPage from './pages/MetricsPage';
 import SettingsPage from './pages/SettingsPage';
 import CreateInvoiceModal from './components/CreateInvoiceModal';
+import BulkImportModal from './components/BulkImportModal';
+import AICopilotDrawer from './components/AICopilotDrawer';
+import ToastNotification from './components/ToastNotification';
 import { setUseMockFallback } from './api/client';
 
 export default function App({ missingKey = false }) {
@@ -16,7 +19,15 @@ export default function App({ missingKey = false }) {
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [authModalMode, setAuthModalMode] = useState(null); // 'sign-in' | 'sign-up' | null
   const [isGlobalCreateModalOpen, setIsGlobalCreateModalOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
+  const [isAICopilotOpen, setIsAICopilotOpen] = useState(false);
+  const [toast, setToast] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   React.useEffect(() => {
     setUseMockFallback(isDemoMode);
@@ -31,6 +42,8 @@ export default function App({ missingKey = false }) {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenAddInvoice={() => setIsGlobalCreateModalOpen(true)}
+        onOpenBulkImport={() => setIsBulkImportOpen(true)}
+        onOpenAICopilot={() => setIsAICopilotOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -80,11 +93,18 @@ export default function App({ missingKey = false }) {
         <header className="sm:hidden bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-30 relative">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold">
-              S
+              ⚡
             </div>
             <span className="text-lg font-semibold text-gray-800">SmartInvoice</span>
           </div>
           <div className="flex gap-1 items-center">
+            <button
+              onClick={() => setIsAICopilotOpen(true)}
+              className="text-xs bg-indigo-50 text-indigo-600 p-2 rounded-lg font-bold flex items-center shadow-xs"
+              title="AI Copilot"
+            >
+              <Sparkles className="w-4 h-4" />
+            </button>
             <button
               onClick={() => setIsGlobalCreateModalOpen(true)}
               className="text-xs bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 shadow-sm"
@@ -117,22 +137,68 @@ export default function App({ missingKey = false }) {
 
         {/* Scrollable Viewport */}
         <div className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50/50 relative">
-          {activeTab === 'dashboard' && <Dashboard key={refreshKey} onOpenAddInvoice={() => setIsGlobalCreateModalOpen(true)} />}
-          {activeTab === 'invoices' && <InvoicesPage key={refreshKey} onOpenAddInvoice={() => setIsGlobalCreateModalOpen(true)} />}
+          {activeTab === 'dashboard' && (
+            <Dashboard
+              key={refreshKey}
+              onOpenAddInvoice={() => setIsGlobalCreateModalOpen(true)}
+              onOpenBulkImport={() => setIsBulkImportOpen(true)}
+              onOpenAICopilot={() => setIsAICopilotOpen(true)}
+            />
+          )}
+          {activeTab === 'invoices' && (
+            <InvoicesPage
+              key={refreshKey}
+              onOpenAddInvoice={() => setIsGlobalCreateModalOpen(true)}
+              onOpenBulkImport={() => setIsBulkImportOpen(true)}
+            />
+          )}
           {activeTab === 'audit' && <AuditPage key={refreshKey} />}
           {activeTab === 'metrics' && <MetricsPage key={refreshKey} />}
-          {activeTab === 'settings' && <SettingsPage key={refreshKey} />}
+          {activeTab === 'settings' && <SettingsPage key={refreshKey} onNotify={showToast} />}
         </div>
+
+        {/* Floating Quick Action Button for AI Copilot */}
+        <button
+          onClick={() => setIsAICopilotOpen(true)}
+          className="fixed bottom-6 right-6 z-30 hidden sm:flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-xs px-4 py-3 rounded-full shadow-lg shadow-indigo-300 hover:shadow-indigo-400 transition-all transform hover:scale-105 active:scale-95"
+        >
+          <Sparkles className="w-4 h-4 animate-spin text-amber-300" style={{ animationDuration: '4s' }} />
+          <span>Ask AI Copilot</span>
+        </button>
       </main>
 
-      {/* Global Add Invoice Modal - Pops up instantly anywhere without scrolling */}
+      {/* Global Add Invoice Modal */}
       <CreateInvoiceModal
         isOpen={isGlobalCreateModalOpen}
         onClose={() => setIsGlobalCreateModalOpen(false)}
         onSuccess={() => {
           setIsGlobalCreateModalOpen(false);
+          showToast('Invoice created successfully!');
           triggerRefresh();
         }}
+      />
+
+      {/* Global Bulk CSV Import Modal */}
+      <BulkImportModal
+        isOpen={isBulkImportOpen}
+        onClose={() => setIsBulkImportOpen(false)}
+        onSuccess={(count) => {
+          setIsBulkImportOpen(false);
+          showToast(`Successfully imported ${count} invoices!`);
+          triggerRefresh();
+        }}
+      />
+
+      {/* AI Copilot Drawer */}
+      <AICopilotDrawer
+        isOpen={isAICopilotOpen}
+        onClose={() => setIsAICopilotOpen(false)}
+      />
+
+      {/* Toast Notification Provider */}
+      <ToastNotification
+        toast={toast}
+        onClose={() => setToast(null)}
       />
     </div>
   );
@@ -141,6 +207,7 @@ export default function App({ missingKey = false }) {
   if (missingKey) {
     return mainDashboardUI;
   }
+
 
   // Auth modal overlay when user clicks Sign In or Sign Up
   const authModalOverlay = authModalMode && (

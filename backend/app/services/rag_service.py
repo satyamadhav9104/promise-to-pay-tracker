@@ -4,9 +4,10 @@ Combines structured database context retrieval with Google Gemini LLM text gener
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import httpx
+
 
 from app.core.config import settings
 from app.models.invoice import Invoice
@@ -43,7 +44,8 @@ def retrieve_invoice_context(db_session, invoice_id: str) -> Dict[str, Any]:
 
     # Fetch audit logs
     audit_logs = db_session.query(ActionLog).filter(ActionLog.invoice_id == invoice_id).order_by(ActionLog.timestamp.desc()).all()
-    logs_summary = [f"{(log.timestamp or datetime.utcnow()).strftime('%Y-%m-%d %H:%M')}: {getattr(log, 'action_taken', 'action')} - {getattr(log, 'detail', '')}" for log in audit_logs]
+    logs_summary = [f"{(log.timestamp or datetime.now(timezone.utc).replace(tzinfo=None)).strftime('%Y-%m-%d %H:%M')}: {getattr(log, 'action_taken', 'action')} - {getattr(log, 'detail', '')}" for log in audit_logs]
+
 
     # Fetch promises
     promises = db_session.query(Promise).filter(Promise.invoice_id == invoice_id).all()

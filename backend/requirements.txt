@@ -2,11 +2,11 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 pymysql==1.1.1
+psycopg2-binary==2.9.9  # Added for Postgres support
 cryptography==43.0.1
 resend==2.4.0
 pydantic==2.9.2
 pydantic-settings==2.5.2
-apscheduler==3.10.4
 razorpay==1.4.2
 anthropic==0.36.0
 pytest==8.3.3
@@ -15,3 +15,10 @@ gunicorn==23.0.0
 pyjwt==2.9.0
 google-generativeai==0.8.3
 
+# Production Additions
+alembic==1.13.3
+celery==5.4.0
+redis==5.0.8
+sentry-sdk==2.13.0
+twilio==9.3.0
+slowapi==0.1.9

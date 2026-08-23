@@ -40,59 +40,100 @@ def ensure_mysql_database_exists():
             print(f"Database pre-creation check note: {e}")
 
 
-def seed():
-    ensure_mysql_database_exists()
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
-
-    try:
-        # Clear existing tables
+def seed_invoices(db: Session, force_clean: bool = False) -> int:
+    """Seeds the database with synthetic B2B invoices and initial promises/logs."""
+    if force_clean:
         db.query(ActionLog).delete()
         db.query(Promise).delete()
         db.query(Invoice).delete()
         db.commit()
 
-        fixtures_dir = os.path.join(os.path.dirname(__file__), "..", "tests", "fixtures")
-        invoices_file = os.path.join(fixtures_dir, "synthetic_invoices.json")
+    fixtures_dir = os.path.join(os.path.dirname(__file__), "..", "tests", "fixtures")
+    invoices_file = os.path.join(fixtures_dir, "synthetic_invoices.json")
 
-        with open(invoices_file, "r") as f:
-            invoices_data = json.load(f)
+    if not os.path.exists(invoices_file):
+        return 0
 
-        invoices_created = 0
-        for data in invoices_data:
-            inv = Invoice(
-                id=data["id"],
-                customer_name=data["customer_name"],
-                amount=data["amount"],
-                due_date=datetime.fromisoformat(data["due_date"]),
-                created_date=datetime.fromisoformat(data["created_date"]),
-                status=InvoiceStatus(data["status"]),
-                touch_count=0,
-                last_touch_at=None
-            )
-            db.add(inv)
-            invoices_created += 1
+    with open(invoices_file, "r", encoding="utf-8") as f:
+        invoices_data = json.load(f)
 
-        db.commit()
-        print(f"Successfully seeded {invoices_created} synthetic invoices into database.")
+    now = datetime.utcnow()
+    invoices_created = 0
+    for data in invoices_data:
+        existing = db.query(Invoice).filter(Invoice.id == data["id"]).first()
+        if existing:
+            continue
 
-        # Seed sample promises/replies for demo
-        sample_replies = [
-            ("INV-1001", "We will process payment for invoice INV-1001 by 2026-09-01."),
-            ("INV-1003", "I already paid this invoice yesterday via Razorpay UPI. Reference ID #RP192837."),
-            ("INV-1004", "We are currently reviewing our cash flow and will try to pay soon."),
-            ("INV-1006", "Sorry for the delay! We will transfer the funds tomorrow morning."),
-        ]
+        cust_name = data.get("customer_name", "B2B Client")
+        clean_name = cust_name.lower().replace(" ", "").replace("&", "").replace(",", "")
+        email = f"billing@{clean_name}.com"
+        status_enum = InvoiceStatus(data.get("status", "created"))
 
-        for inv_id, reply_text in sample_replies:
-            extract_and_log_reply(
-                input_data=CustomerReplyInput(invoice_id=inv_id, reply_text=reply_text),
-                db=db
-            )
+        inv = Invoice(
+            id=data["id"],
+            customer_name=cust_name,
+            customer_email=email,
+            invoice_type="payable" if ("Corp" in cust_name or "Solutions" in cust_name or int(data["id"].replace("INV-", "")) % 4 == 0) else "receivable",
+            amount=float(data.get("amount", 5000.0)),
+            due_date=datetime.fromisoformat(data["due_date"]),
+            created_date=datetime.fromisoformat(data["created_date"]),
+            status=status_enum,
+            touch_count=1 if status_enum in (InvoiceStatus.OVERDUE, InvoiceStatus.DUE_SOON, InvoiceStatus.PROMISE_MADE) else (3 if status_enum == InvoiceStatus.ESCALATED else 0),
+            last_touch_at=now - timedelta(days=2) if status_enum in (InvoiceStatus.OVERDUE, InvoiceStatus.ESCALATED) else None
+        )
+        db.add(inv)
+        invoices_created += 1
 
-        print("Successfully processed sample customer replies and promises.")
+        log_entry = ActionLog(
+            id=str(uuid.uuid4()),
+            invoice_id=inv.id,
+            timestamp=inv.created_date,
+            trigger="system_ingestion",
+            action_taken="invoice_created",
+            rule_applied="initial_ingestion",
+            actor="system",
+            detail=f"Ingested B2B invoice {inv.id} for {inv.customer_name} (${inv.amount:,.2f}). Status: {inv.status.value}."
+        )
+        db.add(log_entry)
 
+    db.commit()
+
+    # Seed sample customer promises for active demo review
+    sample_replies = [
+        ("INV-1001", "We will process payment for invoice INV-1001 by 2026-09-01."),
+        ("INV-1003", "I already paid this invoice yesterday via Razorpay UPI. Reference ID #RP192837."),
+        ("INV-1004", "We are currently reviewing our cash flow and will try to pay soon."),
+        ("INV-1006", "Sorry for the delay! We will transfer the funds tomorrow morning."),
+    ]
+
+    for inv_id, reply_text in sample_replies:
+        if not db.query(Promise).filter(Promise.invoice_id == inv_id).first():
+            try:
+                extract_and_log_reply(
+                    input_data=CustomerReplyInput(invoice_id=inv_id, reply_text=reply_text),
+                    db=db
+                )
+            except Exception as e:
+                print(f"Sample reply note ({inv_id}): {e}")
+
+    return invoices_created
+
+
+def seed_database_if_empty(db: Session) -> int:
+    """Seeds the database only if there are currently 0 invoices."""
+    count = db.query(Invoice).count()
+    if count > 0:
+        return count
+    return seed_invoices(db, force_clean=False)
+
+
+def seed():
+    ensure_mysql_database_exists()
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        count = seed_invoices(db, force_clean=True)
+        print(f"Successfully seeded {count} synthetic invoices into database.")
     except Exception as e:
         db.rollback()
         print(f"Error seeding database: {e}")
@@ -103,3 +144,4 @@ def seed():
 
 if __name__ == "__main__":
     seed()
+

@@ -1,6 +1,6 @@
 """FastAPI routes for invoice query, detail, metrics, and dataset seeding."""
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -18,6 +18,10 @@ from app.core.rules import Channel
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
 
 
+def get_current_utc():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 @router.post("", response_model=InvoiceResponse, status_code=201)
 def create_invoice(
     invoice_in: InvoiceCreate,
@@ -29,7 +33,7 @@ def create_invoice(
     if existing:
         raise HTTPException(status_code=400, detail=f"Invoice with ID '{invoice_in.id}' already exists.")
 
-    now = datetime.utcnow()
+    now = get_current_utc()
     due_dt = invoice_in.due_date.replace(tzinfo=None) if invoice_in.due_date.tzinfo else invoice_in.due_date
     status = InvoiceStatus.OVERDUE if due_dt < now else InvoiceStatus.CREATED
 
@@ -93,8 +97,9 @@ def send_invoice_email(invoice_id: str, db: Session = Depends(get_db)):
     if not invoice:
         raise HTTPException(status_code=404, detail=f"Invoice '{invoice_id}' not found.")
 
+    now = get_current_utc()
     invoice.touch_count += 1
-    invoice.last_touch_at = datetime.utcnow()
+    invoice.last_touch_at = now
 
     due_str = invoice.due_date.strftime("%Y-%m-%d") if invoice.due_date else "N/A"
     recipient = getattr(invoice, 'customer_email', None) or f"{invoice.customer_name.lower().replace(' ', '.')}@example.com"
@@ -111,7 +116,7 @@ def send_invoice_email(invoice_id: str, db: Session = Depends(get_db)):
     log_entry = ActionLog(
         id=str(uuid.uuid4()),
         invoice_id=invoice.id,
-        timestamp=datetime.utcnow(),
+        timestamp=now,
         trigger="user_manual_nudge",
         action_taken="email_sent",
         rule_applied="outbound_notification",
@@ -121,6 +126,7 @@ def send_invoice_email(invoice_id: str, db: Session = Depends(get_db)):
     db.add(log_entry)
     db.commit()
     db.refresh(invoice)
+
 
     return {
         "message": f"Automated email sent to {recipient}!",

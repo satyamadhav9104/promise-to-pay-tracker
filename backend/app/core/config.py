@@ -1,15 +1,19 @@
-"""Application configuration loaded from environment variables."""
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    app_version: str = "1.1.0"
+    app_version: str = "1.2.0"
+    environment: str = "development"
     database_url: str = "mysql+pymysql://root:123456789@localhost:3306/promise_to_pay_db"
+    allowed_origins: str = "*"
+    frontend_url: str = "http://localhost:3000"
+
     razorpay_key_id: str = "rzp_test_mock12345"
     razorpay_key_secret: str = "mock_secret_12345"
     razorpay_webhook_secret: str = ""
     llm_api_key: str = ""
-    llm_provider: str = "anthropic"  # anthropic | gemini
+    llm_provider: str = "gemini"  # anthropic | gemini
 
     # Free Resend API configuration (3,000 free emails/month)
     resend_api_key: str = ""
@@ -31,9 +35,15 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
     clerk_issuer: str = ""
+    
+    # Production additions
+    celery_broker_url: str = "redis://localhost:6379/0"
+    sentry_dsn: str = ""
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_whatsapp_number: str = ""
 
-    class Config:
-        env_file = ".env"
+    model_config = ConfigDict(extra="ignore", env_file=".env")
 
 
 settings = Settings()

@@ -18,7 +18,7 @@ import { fetchInvoices, fetchMetrics, triggerSchedulerTick } from '../api/client
 import InvoiceList from '../components/InvoiceList';
 import CreateInvoiceModal from '../components/CreateInvoiceModal';
 
-export default function Dashboard({ onOpenAddInvoice }) {
+export default function Dashboard({ onOpenAddInvoice, onOpenBulkImport, onOpenAICopilot }) {
   const [invoices, setInvoices] = useState([]);
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -26,6 +26,9 @@ export default function Dashboard({ onOpenAddInvoice }) {
   const [tickLoading, setTickLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
+  const currencyCode = localStorage.getItem('smartinvoice_currency') || 'INR';
+  const currencySymbol = currencyCode === 'INR' ? '₹' : currencyCode === 'EUR' ? '€' : currencyCode === 'GBP' ? '£' : '$';
 
   const loadData = async () => {
     try {
@@ -54,7 +57,7 @@ export default function Dashboard({ onOpenAddInvoice }) {
     setNotification(null);
     try {
       const res = await triggerSchedulerTick();
-      setNotification(`AI Recovery Agent Executed: Evaluated ${res.processed_count} invoices successfully.`);
+      setNotification(`AI Recovery Agent Executed: Evaluated ${res.processed_count || res.evaluated_actions_count || 0} invoices successfully.`);
       await loadData();
     } catch (err) {
       alert('Error triggering AI recovery tick: ' + err.message);
@@ -85,7 +88,7 @@ export default function Dashboard({ onOpenAddInvoice }) {
   const overdueInvoices = invoices.filter(inv => ['Overdue', 'overdue', 'escalated', 'promise_due', 'pending_verification'].includes(inv.status)).length;
   
   const totalAmount = invoices.reduce((sum, inv) => sum + parseFloat(inv.amount || 0), 0);
-  const formattedTotal = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(totalAmount);
+  const formattedTotal = `${currencySymbol}${totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
   return (
     <div className="space-y-8 animate-in p-4 sm:p-8 max-w-7xl mx-auto pb-24">
@@ -93,26 +96,38 @@ export default function Dashboard({ onOpenAddInvoice }) {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Dashboard Overview</h1>
-          <p className="text-gray-500 mt-1">Here's what's happening with your invoices today.</p>
+          <p className="text-gray-500 mt-1">Real-time ledger overview, recovery rate, and automated promise tracking.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={handleRunTick}
             disabled={tickLoading}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-indigo-200 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-xs shadow-indigo-200 transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50"
           >
             <Zap className={`w-4 h-4 ${tickLoading ? 'animate-bounce' : ''}`} />
-            {tickLoading ? 'Evaluating...' : 'Run AI Recovery'}
+            {tickLoading ? 'Evaluating...' : 'Run Recovery Sweep'}
           </button>
+
+          {onOpenAICopilot && (
+            <button
+              onClick={onOpenAICopilot}
+              className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-3.5 py-2.5 rounded-xl font-bold shadow-xs transition-colors flex items-center gap-1.5 text-xs"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              Copilot
+            </button>
+          )}
+
           <button
             onClick={onOpenAddInvoice || (() => setIsCreateModalOpen(true))}
-            className="bg-gray-900 hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-medium shadow-sm shadow-gray-200 transition-colors flex items-center gap-2 cursor-pointer"
+            className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-xs transition-colors flex items-center gap-1.5 text-xs"
           >
             <Plus className="w-4 h-4" />
             New Invoice
           </button>
         </div>
       </div>
+
 
       {/* Notification Banner */}
       {notification && (

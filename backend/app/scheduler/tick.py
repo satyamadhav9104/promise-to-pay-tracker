@@ -4,7 +4,7 @@ Evaluates all non-closed invoices, enforces stopping rules (cooldown, touch caps
 executes escalation touches, and logs every decision (including no-ops) to ActionLog.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 
@@ -23,7 +23,10 @@ def run_scheduler_tick(db: Session, now: Optional[datetime] = None) -> List[Dict
     Returns a list of decision records for API/logging.
     """
     if now is None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+    elif now.tzinfo:
+        now = now.replace(tzinfo=None)
+
 
     # FR13: Structurally exclude paid & written-off invoices from query
     invoices = db.query(Invoice).filter(

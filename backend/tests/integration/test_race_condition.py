@@ -3,7 +3,7 @@ Integration test for Race Condition prevention.
 Verifies that customer claims ("I already paid") pause automated actions (pending_verification),
 and ONLY actual payment webhooks/verification transition the invoice to PAID.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -21,12 +21,14 @@ def test_race_condition_unverified_claim_pauses_scheduler_until_webhook():
     Session = sessionmaker(bind=engine)
     db = Session()
 
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
     # 1. Setup overdue invoice
     inv = Invoice(
         id="RACE-101",
         customer_name="Race Condition Corp",
         amount=7500.0,
-        due_date=datetime.utcnow() - timedelta(days=2),
+        due_date=now_utc - timedelta(days=2),
         status=InvoiceStatus.OVERDUE,
         touch_count=0
     )
@@ -47,7 +49,7 @@ def test_race_condition_unverified_claim_pauses_scheduler_until_webhook():
     assert inv.status != InvoiceStatus.PAID
 
     # 3. Scheduler runs — outbound actions MUST be paused (FR22)
-    tick_res = run_scheduler_tick(db, now=datetime.utcnow() + timedelta(days=1))
+    tick_res = run_scheduler_tick(db, now=now_utc + timedelta(days=1))
     assert len(tick_res) == 1
     assert tick_res[0]["action"] == "no_op"
     assert tick_res[0]["reason"] == "pending_verification_pause"
@@ -63,7 +65,8 @@ def test_race_condition_unverified_claim_pauses_scheduler_until_webhook():
     assert inv.status == InvoiceStatus.PAID
 
     # 5. Subsequent scheduler runs ignore paid invoice (FR13)
-    tick_res2 = run_scheduler_tick(db, now=datetime.utcnow() + timedelta(days=2))
+    tick_res2 = run_scheduler_tick(db, now=now_utc + timedelta(days=2))
     assert len(tick_res2) == 0  # Structurally excluded from query
+
 
     db.close()

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.db.session import get_db
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.promise import Promise, PromiseStatus
+from app.models.idempotency import IdempotencyRecord
 from app.services.razorpay_client import verify_razorpay_webhook_signature
 from app.services.state_machine import transition_invoice_status
 
@@ -28,7 +29,8 @@ async def razorpay_webhook(
 ):
     """
     FR11-FR13: Handles Razorpay payment.captured webhook events.
-    Verifies HMAC signature, atomically updates invoice to PAID, and marks promises KEPT.
+    Verifies HMAC signature, checks idempotency / replay protection,
+    atomically updates invoice to PAID, and marks promises KEPT.
     """
     raw_body = await request.body()
     body_text = raw_body.decode("utf-8")
@@ -42,11 +44,25 @@ async def razorpay_webhook(
 
     if event in ("payment.captured", "payment.authorized") or not event:
         payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        payment_id = payment_entity.get("id") or payload.get("payment_id")
         notes = payment_entity.get("notes", {})
         invoice_id = notes.get("invoice_id") or payment_entity.get("description") or payload.get("invoice_id")
 
         if not invoice_id:
             return {"status": "ignored", "reason": "No invoice_id found in payment notes"}
+
+        # Idempotency / Replay protection check
+        if payment_id:
+            existing_record = db.query(IdempotencyRecord).filter(
+                IdempotencyRecord.id == payment_id,
+                IdempotencyRecord.scope == "razorpay_webhook"
+            ).first()
+            if existing_record:
+                return {
+                    "status": "success",
+                    "message": "Payment event already processed (idempotent replay protection)",
+                    "payment_id": payment_id
+                }
 
         invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
         if not invoice:
@@ -69,13 +85,24 @@ async def razorpay_webhook(
             trigger="razorpay_webhook_payment_captured",
             actor="system",
             rule_applied="payment_captured_verification",
-            detail=f"Webhook event '{event}' verified. Payment ID: {payment_entity.get('id')}. Invoice marked PAID."
+            detail=f"Webhook event '{event}' verified. Payment ID: {payment_id}. Invoice marked PAID."
         )
+
+        # Record idempotency record
+        if payment_id:
+            db.add(IdempotencyRecord(
+                id=payment_id,
+                scope="razorpay_webhook",
+                status="processed",
+                response_payload=f"invoice_id:{invoice.id}"
+            ))
+
         db.commit()
 
-        return {"status": "success", "invoice_id": invoice.id, "new_status": invoice.status.value}
+        return {"status": "success", "invoice_id": invoice.id, "new_status": invoice.status.value, "payment_id": payment_id}
 
     return {"status": "ignored", "event": event}
+
 
 
 @router.post("/simulate-payment")

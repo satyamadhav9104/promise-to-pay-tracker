@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, RefreshCw, FileText, CheckCircle, Clock, AlertCircle, PlusCircle } from 'lucide-react';
+import { Search, Filter, RefreshCw, FileText, CheckCircle, Clock, AlertCircle, PlusCircle, Download, FileSpreadsheet } from 'lucide-react';
 import { fetchInvoices, simulatePayment } from '../api/client';
 import InvoiceList from '../components/InvoiceList';
 import CreateInvoiceModal from '../components/CreateInvoiceModal';
 
-export default function InvoicesPage() {
+export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isLocalCreateModalOpen, setIsLocalCreateModalOpen] = useState(false);
 
   const loadInvoices = async () => {
     try {
@@ -41,6 +41,30 @@ export default function InvoicesPage() {
     return matchesSearch;
   });
 
+  const handleExportCSV = () => {
+    if (filteredInvoices.length === 0) return;
+    const headers = ['Invoice ID', 'Customer Name', 'Customer Email', 'Amount (INR)', 'Due Date', 'Status', 'Touches'];
+    const rows = filteredInvoices.map(i => [
+      i.id || i.invoice_number,
+      `"${(i.customer_name || i.client_name || '').replace(/"/g, '""')}"`,
+      i.customer_email || '',
+      i.amount || 0,
+      i.due_date ? i.due_date.split('T')[0] : '',
+      i.status || 'created',
+      i.touch_count || 0
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `smartinvoice_export_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleSimulatePayment = async (invoiceId) => {
     try {
       const res = await simulatePayment(invoiceId);
@@ -59,17 +83,36 @@ export default function InvoicesPage() {
           <p className="text-gray-500 mt-1">Manage and track all B2B receivables across the recovery lifecycle.</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-emerald-200 transition-colors flex items-center gap-2 text-sm"
+            onClick={handleExportCSV}
+            disabled={filteredInvoices.length === 0}
+            className="bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 px-3.5 py-2.5 rounded-xl font-semibold transition-colors flex items-center gap-1.5 text-xs shadow-xs disabled:opacity-50"
+          >
+            <Download className="w-4 h-4 text-gray-500" />
+            Export CSV
+          </button>
+
+          {onOpenBulkImport && (
+            <button
+              onClick={onOpenBulkImport}
+              className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3.5 py-2.5 rounded-xl font-semibold transition-colors flex items-center gap-1.5 text-xs shadow-xs"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
+              Import CSV
+            </button>
+          )}
+
+          <button
+            onClick={onOpenAddInvoice || (() => setIsLocalCreateModalOpen(true))}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-sm shadow-indigo-200 transition-colors flex items-center gap-1.5 text-xs"
           >
             <PlusCircle className="w-4 h-4" />
             Add Invoice
           </button>
         </div>
-
       </div>
+
 
 
       {notification && (

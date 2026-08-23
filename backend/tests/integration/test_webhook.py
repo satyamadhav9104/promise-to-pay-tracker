@@ -1,5 +1,5 @@
 """Integration tests for Razorpay Webhook endpoint and payment resolution."""
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -38,9 +38,10 @@ def test_razorpay_webhook_captured_event():
         id="WEBHOOK-101",
         customer_name="Webhook Test Inc",
         amount=3500.0,
-        due_date=datetime.utcnow(),
+        due_date=datetime.now(timezone.utc).replace(tzinfo=None),
         status=InvoiceStatus.OVERDUE
     )
+
     db.add(inv)
     db.commit()
     db.close()

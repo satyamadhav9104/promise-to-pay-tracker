@@ -1,5 +1,5 @@
 """Unit tests for business escalation rules, touch caps, and cooldown enforcement."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -23,11 +23,13 @@ def test_cooldown_and_touch_cap_in_scheduler():
     Session = sessionmaker(bind=engine)
     db = Session()
 
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
     inv = Invoice(
         id="RULE-101",
         customer_name="Rule Test Customer",
         amount=5000.0,
-        due_date=datetime.utcnow() - timedelta(days=5),
+        due_date=now - timedelta(days=5),
         status=InvoiceStatus.OVERDUE,
         touch_count=0,
         last_touch_at=None
@@ -35,7 +37,6 @@ def test_cooldown_and_touch_cap_in_scheduler():
     db.add(inv)
     db.commit()
 
-    now = datetime.utcnow()
 
     # Tick 1: Should execute touch 1 (email)
     res1 = run_scheduler_tick(db, now=now)

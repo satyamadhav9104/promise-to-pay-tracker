@@ -1,6 +1,6 @@
 """Unit tests for Invoice State Machine and transition invariants."""
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -24,7 +24,7 @@ def test_valid_state_transitions(db_session):
         id="TEST-101",
         customer_name="Test Corp",
         amount=1000.0,
-        due_date=datetime.utcnow(),
+        due_date=datetime.now(timezone.utc).replace(tzinfo=None),
         status=InvoiceStatus.CREATED
     )
     db_session.add(inv)
@@ -52,7 +52,7 @@ def test_invalid_state_transition_raises_error(db_session):
         id="TEST-102",
         customer_name="Test Corp",
         amount=1000.0,
-        due_date=datetime.utcnow(),
+        due_date=datetime.now(timezone.utc).replace(tzinfo=None),
         status=InvoiceStatus.CREATED
     )
     db_session.add(inv)
@@ -68,11 +68,12 @@ def test_terminal_paid_state_immutability(db_session):
         id="TEST-103",
         customer_name="Test Corp",
         amount=1000.0,
-        due_date=datetime.utcnow(),
+        due_date=datetime.now(timezone.utc).replace(tzinfo=None),
         status=InvoiceStatus.PAID
     )
     db_session.add(inv)
     db_session.commit()
+
 
     with pytest.raises(InvalidStateTransitionError):
         transition_invoice_status(db_session, inv, InvoiceStatus.OVERDUE, trigger="test")

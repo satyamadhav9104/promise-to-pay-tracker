@@ -1,6 +1,6 @@
 """FastAPI routes for customer reply extraction and promise logging."""
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,11 @@ from app.services.notifier import send_notification
 from app.core.rules import Channel
 
 router = APIRouter(prefix="/promises", tags=["Promises & Replies"])
+
+
+def get_current_utc():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 
 @router.post("/extract")
@@ -63,13 +68,14 @@ def extract_and_log_reply(input_data: CustomerReplyInput, db: Session = Depends(
             reasoning=result.reasoning,
             source_text=input_data.reply_text,
             status=PromiseStatus.FLAGGED_HUMAN_REVIEW,
-            created_at=datetime.utcnow()
+            created_at=get_current_utc()
         )
         db.add(promise_record)
 
         log_entry = ActionLog(
             id=str(uuid.uuid4()),
             invoice_id=invoice.id,
+            timestamp=get_current_utc(),
             trigger="customer_reply",
             action_taken="promise_proposed_awaiting_approval",
             rule_applied="human_in_the_loop_review",
@@ -92,6 +98,7 @@ def extract_and_log_reply(input_data: CustomerReplyInput, db: Session = Depends(
     log_entry = ActionLog(
         id=str(uuid.uuid4()),
         invoice_id=invoice.id,
+        timestamp=get_current_utc(),
         trigger="customer_reply",
         action_taken="no_op",
         rule_applied="reply_analysis",
@@ -131,7 +138,7 @@ def approve_promise(promise_id: str, db: Session = Depends(get_db)):
             confidence_score=0.95,
             source_text="Approved payment promise",
             status=PromiseStatus.ACTIVE,
-            created_at=datetime.utcnow()
+            created_at=get_current_utc()
         )
         db.add(promise)
 
@@ -180,7 +187,7 @@ def reject_promise(promise_id: str, db: Session = Depends(get_db)):
             confidence_score=0.95,
             source_text="Rejected payment promise",
             status=PromiseStatus.BROKEN,
-            created_at=datetime.utcnow()
+            created_at=get_current_utc()
         )
         db.add(promise)
 
@@ -196,9 +203,10 @@ def reject_promise(promise_id: str, db: Session = Depends(get_db)):
 
         # Automatically send "Pay Now" reminder email to customer with Razorpay payment link
         invoice.touch_count += 1
-        invoice.last_touch_at = datetime.utcnow()
+        invoice.last_touch_at = get_current_utc()
         due_str = invoice.due_date.strftime("%Y-%m-%d") if invoice.due_date else "N/A"
         recipient = getattr(invoice, 'customer_email', None) or f"{invoice.customer_name.lower().replace(' ', '.')}@example.com"
+
         
         send_notification(
             customer_name=invoice.customer_name,

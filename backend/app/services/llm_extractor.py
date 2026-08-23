@@ -8,11 +8,12 @@ import os
 import json
 import re
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.core.config import settings
 from app.schemas.extraction import PromiseExtractionResult
+
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def _heuristic_extractor(reply_text: str) -> PromiseExtractionResult:
             pass
 
     # Relative date terms
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if "tomorrow" in text_lower:
         return PromiseExtractionResult(
             is_promise=True,
@@ -142,7 +143,8 @@ def _extract_with_gemini(reply_text: str) -> Optional[PromiseExtractionResult]:
     if not settings.llm_api_key or not settings.llm_api_key.startswith("AIza"):
         return None
 
-    models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash"]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
     prompt = f"""
 Analyze customer reply regarding invoice payment:
 "{reply_text}"

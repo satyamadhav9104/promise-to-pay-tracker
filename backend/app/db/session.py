@@ -1,8 +1,18 @@
-"""Database session management with SQLAlchemy for MySQL and SQLite."""
+"""Database session management with SQLAlchemy for PostgreSQL, MySQL, and SQLite."""
+import os
 from urllib.parse import urlparse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
+
+
+def normalize_database_url(url_str: str) -> str:
+    """Normalizes database connection URL for SQLAlchemy 2.0+ compatibility."""
+    if not url_str:
+        return "sqlite:///./promise_to_pay.db"
+    if url_str.startswith("postgres://"):
+        return url_str.replace("postgres://", "postgresql://", 1)
+    return url_str
 
 
 def ensure_database_exists(url_str: str):
@@ -32,7 +42,8 @@ def ensure_database_exists(url_str: str):
             print(f"[DB] Automatic database creation check note: {e}")
 
 
-db_url = settings.database_url
+raw_db_url = settings.database_url or "sqlite:///./promise_to_pay.db"
+db_url = normalize_database_url(raw_db_url)
 
 # If default MySQL is unreachable in cloud container, fallback to embedded SQLite
 if db_url.startswith("mysql"):
@@ -68,9 +79,11 @@ engine_kwargs = {}
 if is_sqlite:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
-    # MySQL / PostgreSQL connection pooling optimization
+    # Production connection pooling for PostgreSQL (Supabase/RDS) and MySQL
     engine_kwargs["pool_pre_ping"] = True
-    engine_kwargs["pool_recycle"] = 3600
+    engine_kwargs["pool_recycle"] = 300
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
 
 engine = create_engine(
     db_url,

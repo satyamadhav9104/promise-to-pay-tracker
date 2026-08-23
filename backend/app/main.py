@@ -1,24 +1,78 @@
 """
 Promise-to-Pay Tracker — Main FastAPI Application entrypoint.
 Razorpay AI Buildathon, Track 03: AI Revenue Recovery.
+Hardened Production Architecture with Lifespan Scheduler & Rate Limiting.
 """
-from fastapi import FastAPI
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from app.db.base import Base
-from app.db.session import engine
+from app.db.session import engine, SessionLocal, get_db
 from app.api.routes import invoices, promises, webhooks, audit, rag, razorpay
+from app.scheduler.tick import run_scheduler_tick
 
-# Initialize database tables
-Base.metadata.create_all(bind=engine)
+logger = logging.getLogger("smartinvoice")
+logging.basicConfig(level=logging.INFO)
+
+# Rate limiter configuration
+limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+
+# Background Periodic Recovery Task
+async def periodic_scheduler_worker():
+    """Runs automated recovery ticks periodically in the background."""
+    logger.info("[SCHEDULER WORKER] Background recovery scheduler worker started.")
+    while True:
+        try:
+            await asyncio.sleep(300)  # Check every 5 minutes
+            db = SessionLocal()
+            try:
+                results = run_scheduler_tick(db)
+                if results:
+                    logger.info(f"[SCHEDULER TICK] Executed periodic sweep: {len(results)} actions evaluated.")
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            logger.info("[SCHEDULER WORKER] Background scheduler worker received cancellation.")
+            break
+        except Exception as e:
+            logger.error(f"[SCHEDULER WORKER ERROR] {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for database table setup and background workers."""
+    # Initialize database tables
+    Base.metadata.create_all(bind=engine)
+    
+    # Start background scheduler
+    task = asyncio.create_task(periodic_scheduler_worker())
+    yield
+    # Graceful shutdown
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
 
 app = FastAPI(
-    title="Promise-to-Pay Tracker API",
-    description="AI Revenue Recovery Agent for B2B Collections — Closed-loop promise tracking & verification.",
-    version="1.0.0"
+    title="SmartInvoice (Promise-to-Pay Tracker API)",
+    description="Enterprise AI Revenue Recovery Agent — Closed-loop promise tracking, Razorpay checkout & automated recovery.",
+    version="1.2.0",
+    lifespan=lifespan
 )
 
-# CORS middleware for React frontend
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,11 +90,26 @@ app.include_router(rag.router, prefix="/api")
 app.include_router(razorpay.router, prefix="/api")
 
 
+@app.post("/api/scheduler/tick", tags=["Scheduler Engine"])
+def trigger_scheduler_tick(db: Session = Depends(get_db)):
+    """
+    Triggers an on-demand scheduler sweep across all active invoices.
+    Evaluates cooldowns, touch caps, and broken promises.
+    """
+    results = run_scheduler_tick(db)
+    return {
+        "success": True,
+        "evaluated_actions_count": len(results),
+        "results": results
+    }
+
+
 @app.get("/api/info")
 def api_info():
     return {
-        "app": "Promise-to-Pay Tracker API",
+        "app": "SmartInvoice — Promise-to-Pay Tracker API",
         "track": "Track 03 — AI Revenue Recovery",
+        "version": "1.2.0",
         "status": "online",
         "docs": "/docs"
     }
@@ -48,9 +117,8 @@ def api_info():
 
 @app.get("/health")
 def health_check():
-    """Production health check endpoint for ECS, Cloud Run, Render, and Heroku health checks."""
+    """Production health check endpoint for ECS, Cloud Run, Render, and Kubernetes health checks."""
     try:
-        from app.db.session import engine
         from sqlalchemy import text
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -61,8 +129,9 @@ def health_check():
     return {
         "status": "ok" if db_status == "healthy" else "degraded",
         "database": db_status,
-        "version": "1.0.0"
+        "version": "1.2.0"
     }
+
 
 
 # Mount built React frontend static files for Heroku / Production

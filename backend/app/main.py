@@ -6,7 +6,7 @@ Hardened Production Architecture with Lifespan Scheduler & Rate Limiting.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.db.base import Base
 from app.db.session import engine, SessionLocal, get_db
-from app.api.routes import invoices, promises, webhooks, audit, rag, razorpay
+from app.api.routes import invoices, promises, webhooks, audit, rag, razorpay, system
 from app.scheduler.tick import run_scheduler_tick
 
 logger = logging.getLogger("smartinvoice")
@@ -50,7 +50,16 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for database table setup and background workers."""
     # Initialize database tables
     Base.metadata.create_all(bind=engine)
-    
+
+    # Apply any guardrail overrides saved from the Settings page
+    db = SessionLocal()
+    try:
+        system.load_guardrails_from_db(db)
+    except Exception as e:
+        logger.warning(f"[STARTUP] Could not load stored guardrail settings: {e}")
+    finally:
+        db.close()
+
     # Start background scheduler
     task = asyncio.create_task(periodic_scheduler_worker())
     yield
@@ -88,20 +97,10 @@ app.include_router(webhooks.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
 app.include_router(razorpay.router, prefix="/api")
+app.include_router(system.router, prefix="/api")
 
 
-@app.post("/api/scheduler/tick", tags=["Scheduler Engine"])
-def trigger_scheduler_tick(db: Session = Depends(get_db)):
-    """
-    Triggers an on-demand scheduler sweep across all active invoices.
-    Evaluates cooldowns, touch caps, and broken promises.
-    """
-    results = run_scheduler_tick(db)
-    return {
-        "success": True,
-        "evaluated_actions_count": len(results),
-        "results": results
-    }
+# POST /api/scheduler/tick is defined once, in app/api/routes/audit.py.
 
 
 @app.get("/api/info")
@@ -148,9 +147,12 @@ if os.path.exists(dist_dir):
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
+        # Unmatched API paths must 404 rather than returning 200 with an error body,
+        # otherwise a typo'd endpoint looks like a working one.
         if full_path.startswith("api") or full_path in ["health", "docs", "openapi.json"]:
-            return {"error": "Not Found"}
+            raise HTTPException(status_code=404, detail="Not Found")
         index_file = os.path.join(dist_dir, "index.html")
         if os.path.exists(index_file):
             return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend build not found. Run `npm run build` in frontend/.")
 

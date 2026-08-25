@@ -19,14 +19,22 @@ import {
   Brain,
   ArrowDownLeft,
   ArrowUpRight,
-  Bot
+  Database,
+  Plus,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
-import AuditTrail from './AuditTrail';
+import AuditTrail, { headlineFor } from './AuditTrail';
 import RazorpayModal from './RazorpayModal';
-import { fetchAuditLogs, submitCustomerReply, simulatePayment, deleteInvoice, sendInvoiceEmail, approvePromise, rejectPromise, fetchVendorRAGAdvice } from '../api/client';
+import { fetchAuditLogs, submitCustomerReply, simulatePayment, deleteInvoice, sendInvoiceEmail, approvePromise, rejectPromise, fetchVendorRAGAdvice, seedDemoData } from '../api/client';
 
-export default function InvoiceList({ invoices = [], onRefresh }) {
+/**
+ * `maxTouches` is the live guardrail value from GET /api/settings. It is a prop
+ * rather than a constant because the cap is editable at runtime on the Settings
+ * page — hardcoding 3 here made the column contradict the actual rule in force.
+ */
+export default function InvoiceList({ invoices = [], onRefresh, onNotify, onSeeded, onCreateInvoice, maxTouches = 3 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   const [filterCategory, setFilterCategory] = useState('All');
@@ -38,6 +46,38 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
   const [replyText, setReplyText] = useState('');
   const [loadingAction, setLoadingAction] = useState(false);
   const [processedPromiseIds, setProcessedPromiseIds] = useState([]);
+  const [seeding, setSeeding] = useState(false);
+  const [seedError, setSeedError] = useState(null);
+
+  const hasNoInvoices = (invoices || []).length === 0;
+
+  /**
+   * Three outcomes worth telling apart: it happened, a guardrail deliberately
+   * withheld it, or it failed. `alert` is only a fallback for the (unused) case
+   * where no notifier was passed in.
+   */
+  const notify = (message, type = 'success') => {
+    if (onNotify) onNotify(message, type);
+    else window.alert(message);
+  };
+
+  /** Reuses the audit trail's wording so the toast and the log agree. */
+  const guardrailSentence = (reason, detail) =>
+    reason ? headlineFor({ rule_that_blocked: reason, detail }) : (detail || 'a guardrail stopped it');
+
+  const handleLoadDemoData = async () => {
+    setSeeding(true);
+    setSeedError(null);
+    try {
+      const res = await seedDemoData();
+      if (onSeeded) onSeeded(res.invoices_created ?? 0);
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      setSeedError(err.message);
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   const filteredInvoices = (invoices || []).filter((invoice) => {
     if (!invoice) return false;
@@ -60,7 +100,7 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
       const res = await fetchVendorRAGAdvice(invoiceId);
       setVendorAdvice((prev) => ({ ...prev, [invoiceId]: res.rag_advice }));
     } catch (err) {
-      alert('Error fetching RAG advice: ' + err.message);
+      notify(`Could not fetch vendor advice: ${err.message}`, 'error');
     } finally {
       setLoadingAction(false);
     }
@@ -88,6 +128,21 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     return `${currencySymbol}${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
   };
 
+  /**
+   * Pre-fills the reply box with a promise the extractor will score highly.
+   *
+   * The date is generated relative to today rather than hardcoded, so the sample
+   * always proposes a future date. A hardcoded date silently becomes a promise for
+   * a date in the past, which the agent correctly refuses to accept — and that looks
+   * like a broken demo.
+   */
+  const sampleReplyFor = (invoice) => {
+    const promised = new Date();
+    promised.setDate(promised.getDate() + 7);
+    const promisedStr = promised.toISOString().split('T')[0];
+    return `Hi team, we acknowledge invoice ${invoice.id} for ${formatCurrency(invoice.amount)}. We will complete the payment transfer by ${promisedStr}.`;
+  };
+
 
   const handleReplySubmit = async (e) => {
     e.preventDefault();
@@ -96,13 +151,46 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     setLoadingAction(true);
     try {
       const targetInvoiceId = activeModal.invoice.id;
-      await submitCustomerReply(targetInvoiceId, replyText);
+      const res = await submitCustomerReply(targetInvoiceId, replyText);
       setActiveModal(null);
       setReplyText('');
       setExpandedInvoiceId(targetInvoiceId);
+
+      // The routing decision is the product. Say which branch was taken and why.
+      const confidence = res.promise?.confidence_score ?? res.extraction?.confidence_score;
+      const asPercent = typeof confidence === 'number' ? `${Math.round(confidence * 100)}%` : null;
+      const promisedDate = res.promise?.promised_date
+        ? new Date(res.promise.promised_date).toLocaleDateString()
+        : null;
+
+      if (res.status === 'pending_verification') {
+        notify(
+          "Customer claims they already paid, so chasing is paused until Razorpay confirms it. Nothing is marked paid on their word alone.",
+          'warning'
+        );
+      } else if (!res.promise) {
+        // The extractor found neither a promise nor a payment claim, so no promise
+        // record exists and nothing is queued for review.
+        notify('Read the reply — there was no promise to pay in it, so nothing changed.', 'info');
+      } else if (res.auto_accepted) {
+        notify(
+          asPercent && promisedDate
+            ? `Promise read at ${asPercent} confidence — above the threshold, so it was accepted automatically and the due date moved to ${promisedDate}.`
+            : 'Promise accepted automatically and the due date was moved.',
+          'success'
+        );
+      } else {
+        notify(
+          asPercent
+            ? `Only ${asPercent} confident in that reply, which is below the threshold — it is queued for your approval instead of acted on.`
+            : 'That reply was too vague to act on, so it is queued for your approval.',
+          'warning'
+        );
+      }
+
       if (onRefresh) onRefresh();
     } catch (err) {
-      alert('Error submitting reply: ' + err.message);
+      notify(`Could not read that reply: ${err.message}`, 'error');
     } finally {
       setLoadingAction(false);
     }
@@ -111,10 +199,14 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
   const handlePaymentSubmit = (invoice) => {
     if (invoice.invoice_type === 'payable') {
       // Vendor bill direct settlement
-      simulatePayment(invoice.id).then(() => {
-        alert(`Bill for ${invoice.customer_name} marked as PAID.`);
-        if (onRefresh) onRefresh();
-      });
+      simulatePayment(invoice.id)
+        .then(() => {
+          notify(`${invoice.id} settled.`, 'success');
+          if (onRefresh) onRefresh();
+        })
+        .catch((err) => {
+          notify(`Could not mark this bill as paid: ${err.message}`, 'error');
+        });
     } else {
       // Open interactive Razorpay checkout modal
       setRazorpayModalInvoice(invoice);
@@ -125,9 +217,10 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     if (!window.confirm(`Are you sure you want to delete invoice ${invoiceId}?`)) return;
     try {
       await deleteInvoice(invoiceId);
+      notify(`${invoiceId} deleted.`, 'success');
       if (onRefresh) onRefresh();
     } catch (err) {
-      alert('Error deleting invoice: ' + err.message);
+      notify(`Could not delete ${invoiceId}: ${err.message}`, 'error');
     }
   };
 
@@ -135,10 +228,25 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     setLoadingAction(true);
     try {
       const res = await sendInvoiceEmail(invoiceId);
-      alert(res.message || `Automated recovery email dispatched to customer!`);
+
+      // The endpoint answers 200 whether or not it sent, because "the guardrail
+      // stopped me" is a legitimate outcome and not an error. Read `sent`.
+      if (res.sent === false) {
+        notify(
+          `Not sent. ${guardrailSentence(res.blocked_by, res.message)}. The same cap applies to this button as to the automated sweep.`,
+          'warning'
+        );
+      } else {
+        notify(
+          res.touch_count
+            ? `Reminder sent — that was touch ${res.touch_count} for this invoice.`
+            : 'Reminder sent.',
+          'success'
+        );
+      }
       if (onRefresh) onRefresh();
     } catch (err) {
-      alert('Error sending email: ' + err.message);
+      notify(`Could not send the reminder: ${err.message}`, 'error');
     } finally {
       setLoadingAction(false);
     }
@@ -150,10 +258,10 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     setLoadingAction(true);
     try {
       const res = await approvePromise(targetId);
-      alert(res.message || 'Payment promise approved! Due date updated to committed date.');
+      notify(res.message || 'Promise approved — the due date now matches the promised date.', 'success');
       if (onRefresh) onRefresh();
     } catch (err) {
-      alert('Error approving promise: ' + err.message);
+      notify(`Could not approve the promise: ${err.message}`, 'error');
     } finally {
       setLoadingAction(false);
     }
@@ -165,10 +273,20 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
     setLoadingAction(true);
     try {
       const res = await rejectPromise(targetId);
-      alert(res.message || 'Payment promise rejected. Payment reminder email dispatched with Razorpay link.');
+
+      // Rejecting escalates the invoice, but it must not buy an extra contact
+      // attempt — so the follow-up email is subject to the same cap.
+      if (res.email_sent === false && res.blocked_by) {
+        notify(
+          `Promise rejected and the invoice escalated, but no email went out. ${guardrailSentence(res.blocked_by, res.message)}.`,
+          'warning'
+        );
+      } else {
+        notify(res.message || 'Promise rejected — a reminder went out with a payment link.', 'success');
+      }
       if (onRefresh) onRefresh();
     } catch (err) {
-      alert('Error rejecting promise: ' + err.message);
+      notify(`Could not reject the promise: ${err.message}`, 'error');
     } finally {
       setLoadingAction(false);
     }
@@ -224,16 +342,72 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
           <tbody className="divide-y divide-gray-100">
             {filteredInvoices.length === 0 ? (
               <tr>
-                <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                      <FileSignature className="w-6 h-6" />
+                <td colSpan="7" className="px-6 py-14 text-center text-gray-500">
+                  {hasNoInvoices ? (
+                    <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                        <FileSignature className="w-6 h-6" />
+                      </div>
+                      <p className="text-base font-bold text-gray-900">No invoices yet</p>
+                      <p className="text-sm text-gray-500 leading-relaxed">
+                        SmartInvoice reads customer replies for payment promises, checks them against
+                        Razorpay payments, and chases the broken ones within strict limits. Load the
+                        sample set to see it work, or add your own invoice.
+                      </p>
+
+                      {seedError && (
+                        <div className="w-full text-left bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-3.5 py-2.5 text-xs flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                          <span>
+                            {seedError} Check that the backend is running on port 8000, then try
+                            again.
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+                        <button
+                          onClick={handleLoadDemoData}
+                          disabled={seeding}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm shadow-indigo-200 transition-colors flex items-center gap-1.5 disabled:opacity-60 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                        >
+                          {seeding ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Loading demo data…
+                            </>
+                          ) : (
+                            <>
+                              <Database className="w-4 h-4" />
+                              Load demo data
+                            </>
+                          )}
+                        </button>
+
+                        {onCreateInvoice && (
+                          <button
+                            onClick={onCreateInvoice}
+                            disabled={seeding}
+                            className="bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 px-4 py-2.5 rounded-xl font-semibold text-xs transition-colors flex items-center gap-1.5 disabled:opacity-60 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+                          >
+                            <Plus className="w-4 h-4 text-gray-500" />
+                            New invoice
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-base font-bold text-gray-900">No Invoices Created Yet</p>
-                    <p className="text-xs text-gray-500 max-w-sm">
-                      Click <strong className="text-indigo-600">+ Add New Invoice</strong> in the sidebar or header to create your first B2B invoice.
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center space-y-2 max-w-md mx-auto">
+                      <div className="w-12 h-12 rounded-2xl bg-gray-100 text-gray-500 flex items-center justify-center">
+                        <Search className="w-6 h-6" />
+                      </div>
+                      <p className="text-base font-bold text-gray-900">No matching invoices</p>
+                      <p className="text-sm text-gray-500">
+                        No invoice matches your search and filters. Clear the search box or set the
+                        status filter back to All.
+                      </p>
+                    </div>
+                  )}
                 </td>
               </tr>
             ) : (
@@ -308,7 +482,9 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                                 <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-purple-100">
                                   <span className="text-xs font-bold text-purple-900 flex items-center gap-1">
                                     <Calendar className="w-3.5 h-3.5 text-purple-600" />
-                                    Proposed: {invoice.promises?.[0]?.promised_date ? new Date(invoice.promises[0].promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Aug 30, 2026'}
+                                    Proposed: {invoice.promises?.[0]?.promised_date
+                                      ? new Date(invoice.promises[0].promised_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                      : 'no date given'}
                                   </span>
                                   <div className="flex gap-2">
                                     <button
@@ -359,7 +535,7 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                         <StatusBadge status={invoice.status} />
                       </td>
                       <td className="px-6 py-4 text-xs font-mono text-gray-500 hidden md:table-cell">
-                        {invoice.touch_count} / 3
+                        {invoice.touch_count} / {maxTouches}
                       </td>
                       <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-2">
@@ -379,12 +555,11 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                               {invoice.invoice_type !== 'payable' && (
                                 <button
                                   onClick={() => {
-                                    const amtStr = invoice.amount ? Number(invoice.amount).toLocaleString('en-US') : '12,500';
-                                    setReplyText(`Hi team, we acknowledge invoice ${invoice.id} for $${amtStr}. We will complete the payment transfer by August 30, 2026.`);
+                                    setReplyText(sampleReplyFor(invoice));
                                     setActiveModal({ type: 'reply', invoice });
                                   }}
                                   className="px-2.5 py-1.5 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium border border-indigo-200 transition-colors flex items-center gap-1"
-                                  title="Simulate Customer Reply"
+                                  title="Paste a sample customer reply and let the agent read it"
                                 >
                                   <MessageSquare className="w-3.5 h-3.5" />
                                   Reply
@@ -393,7 +568,11 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                               <button
                                 onClick={() => handlePaymentSubmit(invoice)}
                                 className="px-2.5 py-1.5 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg font-medium border border-emerald-200 transition-colors flex items-center gap-1 cursor-pointer"
-                                title="Open Live Razorpay Standard Checkout Popup"
+                                title={
+                                  invoice.invoice_type === 'payable'
+                                    ? 'Record this vendor bill as settled'
+                                    : 'Open the Razorpay checkout popup'
+                                }
                               >
                                 <CreditCard className="w-3.5 h-3.5" />
                                 {invoice.invoice_type === 'payable' ? 'Mark Paid' : 'Pay via Razorpay'}
@@ -402,7 +581,7 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                                 onClick={() => handleSendEmail(invoice.id)}
                                 disabled={loadingAction}
                                 className="px-2.5 py-1.5 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-medium border border-blue-200 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                                title="Send Automated Email with Razorpay Payment Link"
+                                title="Send a reminder now — subject to the same touch cap and cooldown as the automated sweep"
                               >
                                 <Mail className="w-3.5 h-3.5" />
                                 Send Link Email
@@ -440,13 +619,22 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                                 </h4>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   {invoice.promises.map((p) => {
-                                    const isApproved = p.status === 'active' || processedPromiseIds.includes(p.id) || processedPromiseIds.includes(invoice.id);
+                                    // The server's own status always wins. `processedPromiseIds`
+                                    // is only an optimistic hint for the gap before the refresh
+                                    // lands, so it must never override a real 'broken' — doing
+                                    // so labelled rejected promises "APPROVED" until reload.
                                     const isRejected = p.status === 'broken';
+                                    const isKept = p.status === 'kept';
+                                    const isApproved = !isRejected && !isKept && (
+                                      p.status === 'active' ||
+                                      processedPromiseIds.includes(p.id) ||
+                                      processedPromiseIds.includes(invoice.id)
+                                    );
 
                                     return (
                                       <div key={p.id} className="bg-purple-50/50 p-3 rounded-xl border border-purple-100 text-xs space-y-2">
                                         <div className="flex justify-between font-medium text-purple-900">
-                                          <span>Status: <strong className="uppercase">{isApproved ? 'ACTIVE (APPROVED)' : p.status}</strong></span>
+                                          <span>Status: <strong className="uppercase">{isApproved ? 'ACTIVE (APPROVED)' : isKept ? 'KEPT (PAID)' : p.status}</strong></span>
                                           <span>Confidence: {(p.confidence_score * 100).toFixed(0)}%</span>
                                         </div>
                                         <div className="text-gray-800 font-bold flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-purple-100">
@@ -457,15 +645,20 @@ export default function InvoiceList({ invoices = [], onRefresh }) {
                                           "{p.source_text}"
                                         </p>
                                         <div className="flex gap-2 pt-1">
-                                          {isApproved ? (
+                                          {isKept ? (
                                             <div className="w-full bg-emerald-100/80 text-emerald-800 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 border border-emerald-200">
                                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                              ✓ Promise Approved (Active)
+                                              ✓ Promise Kept — payment received
                                             </div>
                                           ) : isRejected ? (
                                             <div className="w-full bg-rose-100/80 text-rose-800 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 border border-rose-200">
                                               <XCircle className="w-3.5 h-3.5 text-rose-600" />
                                               ✕ Promise Rejected
+                                            </div>
+                                          ) : isApproved ? (
+                                            <div className="w-full bg-emerald-100/80 text-emerald-800 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 border border-emerald-200">
+                                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                              ✓ Promise Approved (Active)
                                             </div>
                                           ) : (
                                             <>

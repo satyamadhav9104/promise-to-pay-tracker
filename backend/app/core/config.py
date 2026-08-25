@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     app_version: str = "1.2.0"
     environment: str = "development"
-    database_url: str = "mysql+pymysql://root:123456789@localhost:3306/promise_to_pay_db"
+    # SQLite is the default so a fresh clone runs with zero setup.
+    # Override with DATABASE_URL for MySQL/Postgres.
+    database_url: str = "sqlite:///./promise_to_pay.db"
     allowed_origins: str = "*"
     frontend_url: str = "http://localhost:3000"
 

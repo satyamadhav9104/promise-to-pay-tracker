@@ -9,16 +9,9 @@ pydantic==2.9.2
 pydantic-settings==2.5.2
 razorpay==1.4.2
 anthropic==0.36.0
-pytest==8.3.3
+python-dateutil==2.9.0.post0
+slowapi==0.1.9
+pyjwt==2.9.0
 httpx==0.27.2
 gunicorn==23.0.0
-pyjwt==2.9.0
-google-generativeai==0.8.3
-
-# Production Additions
-alembic==1.13.3
-celery==5.4.0
-redis==5.0.8
-sentry-sdk==2.13.0
-twilio==9.3.0
-slowapi==0.1.9
+pytest==8.3.3

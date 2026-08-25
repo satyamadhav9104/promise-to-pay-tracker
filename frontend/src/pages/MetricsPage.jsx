@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, TrendingUp, DollarSign, CheckCircle2, AlertTriangle, RefreshCw, UserX } from 'lucide-react';
+import { BarChart3, TrendingUp, DollarSign, CheckCircle2, AlertTriangle, RefreshCw, UserX, AlertCircle } from 'lucide-react';
 import { fetchMetrics } from '../api/client';
 
 export default function MetricsPage() {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const loadMetrics = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
       const data = await fetchMetrics();
       setMetrics(data);
+      setError(null);
     } catch (err) {
-      console.error('Failed to load metrics:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -30,8 +32,31 @@ export default function MetricsPage() {
     );
   }
 
+  if (error && !metrics) {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center animate-in">
+        <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+        <p className="text-base font-semibold text-gray-900 mt-3">Could not load metrics</p>
+        <p className="text-sm text-gray-500 mt-1">{error}</p>
+        <p className="text-xs text-gray-400 mt-2">
+          Check that the backend is running on port 8000, then try again.
+        </p>
+        <button
+          onClick={loadMetrics}
+          className="mt-4 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
   const formatCurrency = (val) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val || 0);
+    new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: localStorage.getItem('smartinvoice_currency') || 'INR',
+      maximumFractionDigits: 0
+    }).format(val || 0);
 
   return (
     <div className="space-y-6 p-4 sm:p-8 max-w-7xl mx-auto pb-24 animate-in">
@@ -48,7 +73,7 @@ export default function MetricsPage() {
           className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm flex items-center gap-2 text-sm font-medium"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Metrics
+          Refresh
         </button>
       </div>
 
@@ -97,7 +122,7 @@ export default function MetricsPage() {
             </div>
           </div>
           <h2 className="text-3xl font-bold text-gray-900">{metrics?.human_escalations_count || 0}</h2>
-          <p className="text-xs text-gray-400">Invoices exceeding 3 touch limits</p>
+          <p className="text-xs text-gray-400">Invoices the agent stopped chasing and handed over</p>
         </div>
       </div>
 
@@ -111,10 +136,16 @@ export default function MetricsPage() {
           <div className="flex items-center justify-between p-4 bg-emerald-50/60 rounded-xl border border-emerald-100">
             <div>
               <span className="text-2xl font-bold text-emerald-900">{metrics?.promises_kept_count || 0}</span>
-              <p className="text-xs text-emerald-700 font-medium">Promises Verified & Kept</p>
+              <p className="text-xs text-emerald-700 font-medium">Promises Kept</p>
             </div>
-            <span className="text-xs bg-emerald-200/80 text-emerald-900 px-3 py-1 rounded-full font-semibold">
-              Verified via Razorpay
+            {/* Not "Verified via Razorpay": this counts every promise in KEPT, which the
+                simulated-payment button also sets. The per-invoice audit row is the only
+                place that knows whether a signature was actually checked. */}
+            <span
+              className="text-xs bg-emerald-200/80 text-emerald-900 px-3 py-1 rounded-full font-semibold"
+              title="Closed by a payment event. Open an invoice's decision log to see whether its webhook signature was verified."
+            >
+              Closed on a payment event
             </span>
           </div>
         </div>

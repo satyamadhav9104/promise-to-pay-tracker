@@ -31,13 +31,19 @@ async def razorpay_webhook(
     FR11-FR13: Handles Razorpay payment.captured webhook events.
     Verifies HMAC signature, checks idempotency / replay protection,
     atomically updates invoice to PAID, and marks promises KEPT.
+
+    The signature is checked on every request, not only when a signature header
+    happens to be present — otherwise omitting the header is enough to mark any
+    invoice PAID, and "only a verified webhook can close an invoice" stops being true.
     """
     raw_body = await request.body()
     body_text = raw_body.decode("utf-8")
 
-    if x_razorpay_signature:
-        if not verify_razorpay_webhook_signature(body_text, x_razorpay_signature):
-            raise HTTPException(status_code=400, detail="Invalid Razorpay webhook signature")
+    # Verified against the RAW body: Razorpay signs the exact bytes it sent, so
+    # re-serialising the parsed JSON would produce a different digest.
+    check = verify_razorpay_webhook_signature(body_text, x_razorpay_signature)
+    if not check.accept:
+        raise HTTPException(status_code=400, detail=check.detail)
 
     payload = await request.json()
     event = payload.get("event")
@@ -84,8 +90,8 @@ async def razorpay_webhook(
             db, invoice, InvoiceStatus.PAID,
             trigger="razorpay_webhook_payment_captured",
             actor="system",
-            rule_applied="payment_captured_verification",
-            detail=f"Webhook event '{event}' verified. Payment ID: {payment_id}. Invoice marked PAID."
+            rule_applied="payment_captured_verification" if check.verified else "payment_captured_unverified_signature",
+            detail=f"Webhook event '{event}'. Payment ID: {payment_id}. {check.detail} Invoice marked PAID."
         )
 
         # Record idempotency record
@@ -99,7 +105,13 @@ async def razorpay_webhook(
 
         db.commit()
 
-        return {"status": "success", "invoice_id": invoice.id, "new_status": invoice.status.value, "payment_id": payment_id}
+        return {
+            "status": "success",
+            "invoice_id": invoice.id,
+            "new_status": invoice.status.value,
+            "payment_id": payment_id,
+            "signature_verified": check.verified,
+        }
 
     return {"status": "ignored", "event": event}
 
@@ -126,18 +138,27 @@ def simulate_payment(input_data: PaymentSimulateInput, db: Session = Depends(get
     for p in active_promises:
         p.status = PromiseStatus.KEPT
 
-    # Single transition to PAID
+    # Single transition to PAID.
+    #
+    # This is a *simulated* payment, so it must not borrow the audit label used for
+    # signature-verified Razorpay webhooks. Claiming "Razorpay confirmed the payment"
+    # for a button click would make the audit trail assert a verification that never
+    # happened — and the product's whole argument is that the log can be trusted.
     transition_invoice_status(
         db, invoice, InvoiceStatus.PAID,
         trigger="demo_simulated_payment",
-        actor="system",
-        rule_applied="verified_payment_resolution",
-        detail=f"Simulated payment received ({input_data.payment_id}). Invoice resolved to PAID."
+        actor="user",
+        rule_applied="simulated_payment_no_verification",
+        detail=(
+            f"Simulated payment received ({input_data.payment_id}). Invoice resolved to PAID. "
+            "This was a manual simulation — no Razorpay webhook was verified."
+        )
     )
     db.commit()
 
     return {
         "invoice_id": invoice.id,
         "status": invoice.status.value,
-        "message": "Payment verified and recorded. Invoice closed as PAID."
+        "signature_verified": False,
+        "message": "Simulated payment recorded. Invoice closed as PAID (no webhook was verified)."
     }

@@ -1,21 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, Filter, RefreshCw, CheckCircle2, ShieldAlert, Clock, Search } from 'lucide-react';
-import { fetchAuditLogs } from '../api/client';
+import { ShieldCheck, RefreshCw, AlertCircle, Search } from 'lucide-react';
+import { fetchAuditLogs, fetchSettings } from '../api/client';
 import AuditTrail from '../components/AuditTrail';
+
+const ACTOR_FILTERS = [
+  { value: '', label: 'All actors' },
+  { value: 'ai', label: 'AI agent' },
+  { value: 'system', label: 'System' },
+  { value: 'user', label: 'Human' }
+];
 
 export default function AuditPage() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [settings, setSettings] = useState(null);
   const [actorFilter, setActorFilter] = useState('');
   const [searchInvoice, setSearchInvoice] = useState('');
 
   const loadLogs = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
       const data = await fetchAuditLogs();
-      setLogs(data);
+      setLogs(data || []);
+      setError(null);
     } catch (err) {
-      console.error('Failed to load audit logs:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -23,13 +33,24 @@ export default function AuditPage() {
 
   useEffect(() => {
     loadLogs();
+    // The banner quotes the guardrails that are actually configured, so it can
+    // never drift from what the engine enforces.
+    fetchSettings()
+      .then(setSettings)
+      .catch(() => setSettings(null));
   }, []);
 
   const filteredLogs = logs.filter((log) => {
     const matchesActor = !actorFilter || log.actor === actorFilter;
-    const matchesInvoice = !searchInvoice || log.invoice_id.toLowerCase().includes(searchInvoice.toLowerCase());
+    const invoiceId = log.invoice_id || '';
+    const matchesInvoice =
+      !searchInvoice || invoiceId.toLowerCase().includes(searchInvoice.toLowerCase());
     return matchesActor && matchesInvoice;
   });
+
+  const blockedCount = filteredLogs.filter((log) => log.rule_that_blocked).length;
+  const maxTouches = settings?.max_touches_per_invoice;
+  const cooldownDays = settings?.cooldown_days_between_touches;
 
   return (
     <div className="space-y-6 p-4 sm:p-8 max-w-7xl mx-auto pb-24 animate-in">
@@ -37,16 +58,16 @@ export default function AuditPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Audit Trail & Rules</h1>
           <p className="text-gray-500 mt-1">
-            Complete, explainable decision log proving why actions were taken or blocked.
+            Every decision the agent made, including every decision not to act.
           </p>
         </div>
 
         <button
           onClick={loadLogs}
-          className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm flex items-center gap-2 text-sm font-medium"
+          className="p-2.5 bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-xl transition-colors shadow-sm flex items-center gap-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Audit Log
+          Refresh
         </button>
       </div>
 
@@ -54,22 +75,41 @@ export default function AuditPage() {
       <div className="bg-indigo-900 text-white rounded-2xl p-6 shadow-md border border-indigo-800 space-y-3">
         <div className="flex items-center gap-2 text-indigo-300 text-xs font-semibold uppercase tracking-wider">
           <ShieldCheck className="w-4 h-4 text-indigo-400" />
-          Active Guardrails & Governance Policies
+          Active guardrails
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
           <div className="bg-indigo-950/60 p-3.5 rounded-xl border border-indigo-800/60 text-xs">
-            <span className="font-semibold text-white block mb-1">Max Touch Cap (3 Touches)</span>
-            <p className="text-indigo-200 text-[11px]">Enforces hard limit of 3 outbound nudges before human handoff.</p>
+            <span className="font-semibold text-white block mb-1">
+              {maxTouches ? `Stops after ${maxTouches} touches` : 'Touch cap'}
+            </span>
+            <p className="text-indigo-200 text-[11px]">
+              {maxTouches
+                ? `After ${maxTouches} outbound touches the agent stops and hands the invoice to a human.`
+                : 'The agent stops chasing after a fixed number of touches and hands the invoice to a human.'}
+            </p>
           </div>
           <div className="bg-indigo-950/60 p-3.5 rounded-xl border border-indigo-800/60 text-xs">
-            <span className="font-semibold text-white block mb-1">4-Day Cooldown</span>
-            <p className="text-indigo-200 text-[11px]">Blocks automated reminders until 4 days elapse after last touch.</p>
+            <span className="font-semibold text-white block mb-1">
+              {cooldownDays ? `${cooldownDays}-day cooldown` : 'Cooldown between touches'}
+            </span>
+            <p className="text-indigo-200 text-[11px]">
+              {cooldownDays
+                ? `No reminder goes out until ${cooldownDays} days have passed since the last one.`
+                : 'No reminder goes out until the quiet window since the last one has passed.'}
+            </p>
           </div>
           <div className="bg-indigo-950/60 p-3.5 rounded-xl border border-indigo-800/60 text-xs">
-            <span className="font-semibold text-white block mb-1">Razorpay Webhook Stopping Rule</span>
-            <p className="text-indigo-200 text-[11px]">Instantly halts all reminders upon receiving verified payment event.</p>
+            <span className="font-semibold text-white block mb-1">Stops on verified payment</span>
+            <p className="text-indigo-200 text-[11px]">
+              A Razorpay payment event closes the invoice and ends all chasing immediately.
+            </p>
           </div>
         </div>
+        {!settings && (
+          <p className="text-[11px] text-indigo-300/80 pt-1">
+            Showing the rules in general terms — the exact values could not be read from the server.
+          </p>
+        )}
       </div>
 
       {/* Filter and Search Bar */}
@@ -85,19 +125,19 @@ export default function AuditPage() {
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-gray-500">Actor Filter:</span>
-          {['', 'ai', 'system'].map((actor) => (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-gray-500">Actor:</span>
+          {ACTOR_FILTERS.map((actor) => (
             <button
-              key={actor}
-              onClick={() => setActorFilter(actor)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold capitalize transition-all ${
-                actorFilter === actor
+              key={actor.value || 'all'}
+              onClick={() => setActorFilter(actor.value)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${
+                actorFilter === actor.value
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
-              {actor === '' ? 'All Actors' : actor}
+              {actor.label}
             </button>
           ))}
         </div>
@@ -105,12 +145,34 @@ export default function AuditPage() {
 
       {/* Log Feed */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        {loading ? (
+        {error ? (
+          <div className="py-8 text-center">
+            <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+            <p className="text-sm font-semibold text-gray-900 mt-3">Could not load the audit trail</p>
+            <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">{error}</p>
+            <p className="text-xs text-gray-400 mt-2">
+              Check that the backend is running on port 8000, then try again.
+            </p>
+            <button
+              onClick={loadLogs}
+              className="mt-4 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+            >
+              Try again
+            </button>
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center h-48">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
           </div>
         ) : (
-          <AuditTrail logs={filteredLogs} />
+          <>
+            {filteredLogs.length > 0 && (
+              <p className="text-xs text-gray-500 pb-3 border-b border-gray-100 mb-2">
+                {filteredLogs.length} decisions · {blockedCount} where the agent held back
+              </p>
+            )}
+            <AuditTrail logs={filteredLogs} showInvoiceId />
+          </>
         )}
       </div>
     </div>

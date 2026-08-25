@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Settings,
   ShieldCheck,
   Building,
   Sliders,
-  Mail,
   CheckCircle2,
-  Key,
-  Globe,
-  Coins,
+  AlertCircle,
+  Loader2,
   Webhook,
   Copy,
   Check
 } from 'lucide-react';
+import { fetchSettings, updateSettings } from '../api/client';
 
 export default function SettingsPage({ onNotify }) {
   // Company Profile
@@ -29,19 +27,40 @@ export default function SettingsPage({ onNotify }) {
     () => localStorage.getItem('smartinvoice_payment_terms') || 'net30'
   );
 
-  // Safety Guardrails
-  const [maxTouches, setMaxTouches] = useState(
-    () => parseInt(localStorage.getItem('smartinvoice_max_touches')) || 3
-  );
-  const [cooldownDays, setCooldownDays] = useState(
-    () => parseInt(localStorage.getItem('smartinvoice_cooldown_days')) || 4
-  );
-  const [confidenceThreshold, setConfidenceThreshold] = useState(
-    () => parseFloat(localStorage.getItem('smartinvoice_confidence_threshold')) || 0.7
-  );
+  // Safety guardrails — these live on the backend, because the recovery engine
+  // is what enforces them. Sliders start empty until the real values arrive.
+  const [maxTouches, setMaxTouches] = useState(null);
+  const [cooldownDays, setCooldownDays] = useState(null);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(null);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+  const [settingsError, setSettingsError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const [saved, setSaved] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
+
+  const applySettings = (data) => {
+    setMaxTouches(data.max_touches_per_invoice);
+    setCooldownDays(data.cooldown_days_between_touches);
+    setConfidenceThreshold(data.promise_confidence_threshold);
+  };
+
+  const loadGuardrails = async () => {
+    setLoadingSettings(true);
+    try {
+      applySettings(await fetchSettings());
+      setSettingsError(null);
+    } catch (err) {
+      setSettingsError(err.message);
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGuardrails();
+  }, []);
 
   const webhookUrl = `${window.location.origin}/api/webhooks/razorpay`;
 
@@ -51,22 +70,48 @@ export default function SettingsPage({ onNotify }) {
     setTimeout(() => setCopiedWebhook(false), 2500);
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
+
+    // Branding stays on this device — the backend has no concept of it.
     localStorage.setItem('smartinvoice_company_name', companyName);
     localStorage.setItem('smartinvoice_currency', currency);
     localStorage.setItem('smartinvoice_support_email', supportEmail);
     localStorage.setItem('smartinvoice_payment_terms', defaultPaymentTerms);
-    localStorage.setItem('smartinvoice_max_touches', maxTouches);
-    localStorage.setItem('smartinvoice_cooldown_days', cooldownDays);
-    localStorage.setItem('smartinvoice_confidence_threshold', confidenceThreshold);
 
-    setSaved(true);
-    if (onNotify) {
-      onNotify('Organization settings & guardrail rules updated successfully!');
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      if (maxTouches === null) {
+        // Guardrails never loaded, so there is nothing safe to send back.
+        setSaved(true);
+        setTimeout(() => setSaved(false), 4000);
+        return;
+      }
+      const updated = await updateSettings({
+        max_touches_per_invoice: maxTouches,
+        cooldown_days_between_touches: cooldownDays,
+        promise_confidence_threshold: confidenceThreshold
+      });
+      applySettings(updated);
+      setSaved(true);
+      if (onNotify) {
+        onNotify(
+          `Guardrails saved: stop after ${updated.max_touches_per_invoice} touches, ` +
+            `wait ${updated.cooldown_days_between_touches} days between touches, ` +
+            `ask a human below ${Math.round(updated.promise_confidence_threshold * 100)}% confidence.`
+        );
+      }
+      setTimeout(() => setSaved(false), 4000);
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
     }
-    setTimeout(() => setSaved(false), 3000);
   };
+
+  const guardrailsReady = !loadingSettings && !settingsError && maxTouches !== null;
 
   return (
     <div className="space-y-6 p-4 sm:p-8 max-w-7xl mx-auto pb-24 animate-in">
@@ -78,7 +123,22 @@ export default function SettingsPage({ onNotify }) {
       {saved && (
         <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl text-sm flex items-center gap-2 shadow-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          Settings updated successfully across your workspace.
+          {guardrailsReady
+            ? 'Saved. The recovery engine will use these guardrails on the next sweep.'
+            : 'Company details saved on this device.'}
+        </div>
+      )}
+
+      {saveError && (
+        <div
+          role="alert"
+          className="bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 rounded-2xl text-sm flex items-start gap-2 shadow-xs"
+        >
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <span>
+            <strong className="font-semibold">Guardrails were not saved.</strong> {saveError} Your
+            company details were still saved on this device.
+          </span>
         </div>
       )}
 
@@ -164,15 +224,49 @@ export default function SettingsPage({ onNotify }) {
                 Escalation & Safety Guardrails
               </h2>
               <p className="text-xs text-gray-500 mt-1">
-                Deterministic business rules to protect client relationships and prevent automated spamming.
+                These are the limits the recovery agent will not cross. They are stored on the
+                server and applied on every sweep.
               </p>
             </div>
 
+            {loadingSettings && (
+              <div className="flex items-center gap-2 text-sm text-gray-500 py-6">
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                Loading the current guardrails…
+              </div>
+            )}
+
+            {settingsError && (
+              <div
+                role="alert"
+                className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-2.5"
+              >
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-rose-900">
+                    Could not load the guardrails
+                  </p>
+                  <p className="text-xs text-rose-800/90 mt-0.5">{settingsError}</p>
+                  <p className="text-xs text-rose-700/80 mt-1">
+                    Check that the backend is running on port 8000, then try again.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={loadGuardrails}
+                    className="mt-3 bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+                  >
+                    Try again
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {guardrailsReady && (
             <div className="space-y-5">
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Maximum Touches per Invoice (Hard Cap)
+                    Stop after this many touches
                   </label>
                   <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
                     {maxTouches} touches
@@ -183,18 +277,19 @@ export default function SettingsPage({ onNotify }) {
                   min="1"
                   max="6"
                   value={maxTouches}
-                  onChange={(e) => setMaxTouches(parseInt(e.target.value) || 3)}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  onChange={(e) => setMaxTouches(parseInt(e.target.value, 10) || 1)}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  Invoices reaching this limit transition to <strong>ESCALATED</strong> for human review.
+                  Once an invoice has had {maxTouches} touches the agent stops chasing it and hands
+                  it to a human.
                 </p>
               </div>
 
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Minimum Cooldown Period
+                    Quiet days between touches
                   </label>
                   <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
                     {cooldownDays} days
@@ -205,18 +300,19 @@ export default function SettingsPage({ onNotify }) {
                   min="1"
                   max="14"
                   value={cooldownDays}
-                  onChange={(e) => setCooldownDays(parseInt(e.target.value) || 4)}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  onChange={(e) => setCooldownDays(parseInt(e.target.value, 10) || 1)}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  Mandatory quiet window between automated reminder touches.
+                  The agent waits at least {cooldownDays} days after a touch before sending another
+                  one, so a customer never gets chased twice in a row.
                 </p>
               </div>
 
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    AI Promise Confidence Gate
+                    Ask a human below this confidence
                   </label>
                   <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
                     {Math.round(confidenceThreshold * 100)}%
@@ -228,22 +324,33 @@ export default function SettingsPage({ onNotify }) {
                   min="0.5"
                   max="0.95"
                   value={confidenceThreshold}
-                  onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value) || 0.7)}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value) || 0.5)}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 />
                 <p className="text-xs text-gray-400 mt-1">
-                  Extraction confidence below this threshold flags promise for human confirmation.
+                  A promise read from a customer reply is only accepted on its own above{' '}
+                  {Math.round(confidenceThreshold * 100)}% confidence. Anything less waits for your
+                  approval.
                 </p>
               </div>
             </div>
+            )}
 
             <div className="pt-2">
               <button
                 type="submit"
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-md shadow-indigo-200 transition-all active:scale-98"
+                disabled={saving || loadingSettings}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-md shadow-indigo-200 transition-all disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
               >
-                Save All Workspace Settings
+                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {saving ? 'Saving…' : 'Save settings'}
               </button>
+              {!guardrailsReady && !loadingSettings && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Saving now stores your company details on this device only — the guardrails could
+                  not be reached.
+                </p>
+              )}
             </div>
           </div>
         </div>

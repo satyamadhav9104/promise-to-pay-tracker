@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.db.session import get_db
+from app.core.config import settings
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.promise import Promise, PromiseStatus
 from app.models.action_log import ActionLog
@@ -13,7 +14,7 @@ from app.schemas.invoice import InvoiceResponse, MetricsResponse, InvoiceCreate
 import uuid
 
 from app.services.notifier import send_notification
-from app.core.rules import Channel
+from app.core.rules import Channel, check_touch_allowed
 
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
 
@@ -92,12 +93,41 @@ def delete_invoice(invoice_id: str, db: Session = Depends(get_db)):
 
 @router.post("/{invoice_id}/send-email")
 def send_invoice_email(invoice_id: str, db: Session = Depends(get_db)):
-    """Triggers automated email notification for an invoice."""
+    """
+    Sends a manual reminder email for an invoice.
+
+    FR17/FR18: this is an outbound touch like any other, so it is subject to the same
+    touch cap and cooldown as the scheduler sweep. Clicking the button repeatedly
+    cannot push touch_count past the cap — the guardrail is a property of the system,
+    not of one code path.
+    """
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail=f"Invoice '{invoice_id}' not found.")
 
     now = get_current_utc()
+    allowed, blocked_reason, blocked_detail = check_touch_allowed(invoice, now)
+
+    if not allowed:
+        db.add(ActionLog(
+            id=str(uuid.uuid4()),
+            invoice_id=invoice.id,
+            timestamp=now,
+            trigger="user_manual_nudge",
+            action_taken="no_op",
+            rule_applied="outbound_guardrail",
+            rule_that_blocked=blocked_reason,
+            actor="system",
+            detail=f"Manual reminder requested but withheld. {blocked_detail}"
+        ))
+        db.commit()
+        return {
+            "sent": False,
+            "blocked_by": blocked_reason,
+            "message": f"Reminder withheld by guardrail. {blocked_detail}",
+            "touch_count": invoice.touch_count,
+        }
+
     invoice.touch_count += 1
     invoice.last_touch_at = now
 
@@ -118,18 +148,23 @@ def send_invoice_email(invoice_id: str, db: Session = Depends(get_db)):
         invoice_id=invoice.id,
         timestamp=now,
         trigger="user_manual_nudge",
-        action_taken="email_sent",
-        rule_applied="outbound_notification",
+        action_taken="sent_email",
+        rule_applied=f"escalation_ladder_step_{invoice.touch_count}",
         actor="user",
-        detail=f"Automated email dispatched to {recipient}. Provider: {result.get('provider', 'smtp')}. Subject: {result.get('subject', 'Payment Reminder')}"
+        detail=(
+            f"Manual reminder sent to {recipient} as touch #{invoice.touch_count} of "
+            f"{settings.max_touches_per_invoice}. Provider: {result.get('provider', 'smtp')}. "
+            f"Subject: {result.get('subject', 'Payment Reminder')}"
+        )
     )
     db.add(log_entry)
     db.commit()
     db.refresh(invoice)
 
-
     return {
-        "message": f"Automated email sent to {recipient}!",
+        "sent": True,
+        "blocked_by": None,
+        "message": f"Reminder email sent to {recipient}.",
         "recipient": recipient,
         "touch_count": invoice.touch_count,
         "email_details": result
@@ -161,10 +196,21 @@ def get_metrics(
 ):
     """
     FR30: Computes summary recovery metrics across the invoice batch.
+
+    Includes the guardrail counters — how many actions the agent declined to take and
+    which rule stopped each one — because "the agent knew when not to act" is only a
+    credible claim if it is measurable.
     """
-    query = db.query(Invoice)
-    if x_user_id:
-        query = query.filter((Invoice.user_id == x_user_id) | (Invoice.user_id.is_(None)) | (Invoice.user_id == ""))
+    def scoped(q):
+        if x_user_id:
+            return q.filter(
+                (Invoice.user_id == x_user_id)
+                | (Invoice.user_id.is_(None))
+                | (Invoice.user_id == "")
+            )
+        return q
+
+    query = scoped(db.query(Invoice))
 
     total_invoices = query.count()
     if total_invoices == 0:
@@ -176,18 +222,20 @@ def get_metrics(
             avg_days_to_recovery=0.0,
             promises_kept_count=0,
             promises_broken_count=0,
-            human_escalations_count=0
+            human_escalations_count=0,
+            paid_invoices_count=0,
+            awaiting_review_count=0,
+            actions_blocked_count=0,
+            blocked_breakdown={}
         )
 
-    total_amount = db.query(func.sum(Invoice.amount)).filter(
-        (Invoice.user_id == x_user_id) | (Invoice.user_id.is_(None)) | (Invoice.user_id == "") if x_user_id else True
-    ).scalar() or 0.0
+    total_amount = scoped(db.query(func.sum(Invoice.amount))).scalar() or 0.0
 
     paid_invoices = query.filter(Invoice.status == InvoiceStatus.PAID).all()
     total_recovered_amount = sum(inv.amount for inv in paid_invoices)
     recovery_rate = (total_recovered_amount / total_amount * 100.0) if total_amount > 0 else 0.0
 
-    # Calculate average days to recovery for paid invoices
+    # Average days from invoice creation to the status_changed:*->paid audit row.
     days_list = []
     for inv in paid_invoices:
         paid_log = db.query(ActionLog).filter(
@@ -202,8 +250,34 @@ def get_metrics(
     avg_days = sum(days_list) / len(days_list) if days_list else 0.0
 
     user_inv_ids = [inv.id for inv in query.all()]
-    promises_kept = db.query(Promise).filter(Promise.invoice_id.in_(user_inv_ids), Promise.status == PromiseStatus.KEPT).count() if user_inv_ids else 0
-    promises_broken = db.query(Promise).filter(Promise.invoice_id.in_(user_inv_ids), Promise.status == PromiseStatus.BROKEN).count() if user_inv_ids else 0
+    promises_kept = 0
+    promises_broken = 0
+    awaiting_review = 0
+    actions_blocked = 0
+    blocked_breakdown: dict = {}
+
+    if user_inv_ids:
+        promises_kept = db.query(Promise).filter(
+            Promise.invoice_id.in_(user_inv_ids), Promise.status == PromiseStatus.KEPT
+        ).count()
+        promises_broken = db.query(Promise).filter(
+            Promise.invoice_id.in_(user_inv_ids), Promise.status == PromiseStatus.BROKEN
+        ).count()
+        awaiting_review = db.query(Promise).filter(
+            Promise.invoice_id.in_(user_inv_ids),
+            Promise.status == PromiseStatus.FLAGGED_HUMAN_REVIEW
+        ).count()
+
+        blocked_rows = db.query(
+            ActionLog.rule_that_blocked, func.count(ActionLog.id)
+        ).filter(
+            ActionLog.invoice_id.in_(user_inv_ids),
+            ActionLog.rule_that_blocked.isnot(None)
+        ).group_by(ActionLog.rule_that_blocked).all()
+
+        blocked_breakdown = {str(rule): int(count) for rule, count in blocked_rows if rule}
+        actions_blocked = sum(blocked_breakdown.values())
+
     human_escalations = query.filter(Invoice.status == InvoiceStatus.ESCALATED).count()
 
     return MetricsResponse(
@@ -214,7 +288,11 @@ def get_metrics(
         avg_days_to_recovery=round(avg_days, 1),
         promises_kept_count=promises_kept,
         promises_broken_count=promises_broken,
-        human_escalations_count=human_escalations
+        human_escalations_count=human_escalations,
+        paid_invoices_count=len(paid_invoices),
+        awaiting_review_count=awaiting_review,
+        actions_blocked_count=actions_blocked,
+        blocked_breakdown=blocked_breakdown
     )
 
 

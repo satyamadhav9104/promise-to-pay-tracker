@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -8,24 +8,38 @@ import {
   Building2,
   ShieldCheck,
   CheckCircle2,
-  Sparkles,
+  AlertCircle,
   Lock,
-  ArrowRight,
-  ExternalLink
+  ArrowRight
 } from 'lucide-react';
-import { verifyRazorpayPayment, simulatePayment } from '../api/client';
+import { verifyRazorpayPayment } from '../api/client';
+
+const defaultVpa = (invoice) =>
+  `${invoice?.customer_name?.toLowerCase().replace(/\s+/g, '') || 'customer'}@oksbi`;
 
 export default function RazorpayModal({ isOpen, onClose, invoice, onSuccess }) {
-  if (!isOpen || !invoice) return null;
-
+  // Every hook must run on every render, so the "nothing to show" check lives
+  // below them — an early return above these calls changes the hook order.
   const [activeTab, setActiveTab] = useState('upi');
-  const [upiId, setUpiId] = useState(`${invoice.customer_name?.toLowerCase().replace(/\s+/g, '') || 'customer'}@oksbi`);
+  const [upiId, setUpiId] = useState(() => defaultVpa(invoice));
   const [cardNumber, setCardNumber] = useState('4111 2222 3333 4444');
   const [cardExpiry, setCardExpiry] = useState('12/28');
   const [cardCvv, setCardCvv] = useState('789');
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [paymentId, setPaymentId] = useState('');
+  const [payError, setPayError] = useState(null);
+
+  // Reset the sheet whenever it is opened for a different invoice.
+  useEffect(() => {
+    if (!isOpen || !invoice) return;
+    setActiveTab('upi');
+    setUpiId(defaultVpa(invoice));
+    setIsProcessing(false);
+    setPaymentSuccess(false);
+    setPaymentId('');
+    setPayError(null);
+  }, [isOpen, invoice?.id]);
 
   const formatAmount = (amt) => {
     return new Intl.NumberFormat('en-IN', {
@@ -35,17 +49,18 @@ export default function RazorpayModal({ isOpen, onClose, invoice, onSuccess }) {
     }).format(amt || 0);
   };
 
-  const handleExecutePayment = async (methodName) => {
+  const handleExecutePayment = async () => {
     setIsProcessing(true);
+    setPayError(null);
     const mockPaymentId = `pay_${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
 
     try {
-      // Simulate real gateway processing delay
+      // Brief pause so the test-mode sheet reads like a real gateway.
       await new Promise((r) => setTimeout(r, 800));
 
       const res = await verifyRazorpayPayment({
         invoice_id: invoice.id,
-        razorpay_order_id: `order_${invoice.id.replace('-', '').toLowerCase()}_${Date.now()}`,
+        razorpay_order_id: `order_${String(invoice.id).replace('-', '').toLowerCase()}_${Date.now()}`,
         razorpay_payment_id: mockPaymentId,
         razorpay_signature: 'sig_verified_razorpay_hmac'
       });
@@ -56,20 +71,16 @@ export default function RazorpayModal({ isOpen, onClose, invoice, onSuccess }) {
       setTimeout(() => {
         if (onSuccess) onSuccess(res);
         onClose();
-      }, 1400);
+      }, 1600);
     } catch (err) {
-      console.warn('Payment verify fallback:', err);
-      const fallback = await simulatePayment(invoice.id);
-      setPaymentId(fallback.payment_ref || mockPaymentId);
-      setPaymentSuccess(true);
-      setTimeout(() => {
-        if (onSuccess) onSuccess(fallback);
-        onClose();
-      }, 1400);
+      // Do not pretend a failed payment succeeded — the invoice is still open.
+      setPayError(err.message);
     } finally {
       setIsProcessing(false);
     }
   };
+
+  if (!isOpen || !invoice) return null;
 
   return createPortal(
     <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-in">
@@ -114,13 +125,15 @@ export default function RazorpayModal({ isOpen, onClose, invoice, onSuccess }) {
         {/* Payment Completed Screen */}
         {paymentSuccess ? (
           <div className="p-8 text-center space-y-4 animate-in">
-            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner animate-bounce">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
               <CheckCircle2 className="w-10 h-10" />
             </div>
             <div>
-              <h4 className="text-xl font-extrabold text-slate-900">Payment Successful!</h4>
-              <p className="text-xs text-slate-500 mt-1">
-                Razorpay Webhook automatically verified and marked invoice as <strong className="text-emerald-600">PAID</strong>.
+              <h4 className="text-xl font-extrabold text-slate-900">Payment captured</h4>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Razorpay test mode captured this payment and the invoice is now marked{' '}
+                <strong className="text-emerald-600">paid</strong>. The agent will stop chasing it,
+                and the decision is written to the audit trail.
               </p>
             </div>
             <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 text-xs font-mono text-slate-700">
@@ -129,6 +142,22 @@ export default function RazorpayModal({ isOpen, onClose, invoice, onSuccess }) {
           </div>
         ) : (
           <div className="p-5 space-y-4">
+            {payError && (
+              <div
+                role="alert"
+                className="bg-rose-50 border border-rose-200 rounded-2xl p-3 flex items-start gap-2.5"
+              >
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-rose-900">Payment was not recorded</p>
+                  <p className="text-[11px] text-rose-800/90 mt-0.5 break-words">{payError}</p>
+                  <p className="text-[11px] text-rose-700/80 mt-1">
+                    The invoice is still open. Check the backend is running, then try again.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Payment Method Tabs */}
             <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-2xl text-xs font-bold">
               <button
@@ -298,14 +327,17 @@ export default function RazorpayModal({ isOpen, onClose, invoice, onSuccess }) {
             )}
 
             {/* Trust Footer */}
+            {/* Accurate footer chrome. The previous "256-bit SSL Encrypted / Razorpay
+                Verified" badges asserted guarantees this test-mode sheet does not
+                provide — no card data is transmitted and no signature is checked. */}
             <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
               <span className="flex items-center gap-1">
-                <Lock className="w-3 h-3 text-emerald-600" />
-                256-bit SSL Encrypted
+                <Lock className="w-3 h-3 text-slate-400" />
+                No card data is sent anywhere
               </span>
               <span className="flex items-center gap-1 font-semibold text-slate-500">
                 <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                Razorpay Verified
+                Razorpay test mode
               </span>
             </div>
           </div>

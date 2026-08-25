@@ -1,37 +1,47 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Filter, RefreshCw, FileText, CheckCircle, Clock, AlertCircle, PlusCircle, Download, FileSpreadsheet } from 'lucide-react';
-import { fetchInvoices, simulatePayment } from '../api/client';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, AlertCircle, PlusCircle, Download, FileSpreadsheet } from 'lucide-react';
+import { fetchInvoices } from '../api/client';
 import InvoiceList from '../components/InvoiceList';
 import CreateInvoiceModal from '../components/CreateInvoiceModal';
 
-export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport }) {
+export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport, onNotify, maxTouches = 3 }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState(null);
   const [isLocalCreateModalOpen, setIsLocalCreateModalOpen] = useState(false);
 
-  const loadInvoices = async () => {
+  // The table refreshes every 3s so webhook-driven changes appear on their own.
+  // Only the very first load is allowed to show a spinner — otherwise the
+  // spinner would strobe over the table forever.
+  const hasLoadedOnce = useRef(false);
+
+  const loadInvoices = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
-      setLoading(true);
       const data = await fetchInvoices(statusFilter);
-      setInvoices(data);
+      setInvoices(data || []);
+      setError(null);
+      hasLoadedOnce.current = true;
     } catch (err) {
-      console.error('Failed to load invoices:', err);
+      // A background refresh failing should not blank out data already on screen.
+      if (!hasLoadedOnce.current) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadInvoices();
-    // Silent auto-refresh every 3 seconds for live demo webhook updates
     const interval = setInterval(() => {
-      loadInvoices();
+      loadInvoices({ silent: true });
     }, 3000);
     return () => clearInterval(interval);
   }, [statusFilter]);
+
+  const openCreateInvoice = onOpenAddInvoice || (() => setIsLocalCreateModalOpen(true));
 
   const filteredInvoices = invoices.filter(inv => {
     const name = inv.customer_name || inv.client_name || '';
@@ -65,14 +75,12 @@ export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport }) {
     document.body.removeChild(link);
   };
 
-  const handleSimulatePayment = async (invoiceId) => {
-    try {
-      const res = await simulatePayment(invoiceId);
-      setNotification(`Payment simulated for ${invoiceId}. Invoice status updated to PAID.`);
-      await loadInvoices();
-    } catch (err) {
-      alert('Error simulating payment: ' + err.message);
-    }
+  const handleSeeded = (count) => {
+    setNotification(
+      count > 0
+        ? `Loaded ${count} sample invoices. Run a recovery sweep from the dashboard to watch the agent decide.`
+        : 'Demo data was already loaded.'
+    );
   };
 
   return (
@@ -104,11 +112,11 @@ export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport }) {
           )}
 
           <button
-            onClick={onOpenAddInvoice || (() => setIsLocalCreateModalOpen(true))}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-sm shadow-indigo-200 transition-colors flex items-center gap-1.5 text-xs"
+            onClick={openCreateInvoice}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-sm shadow-indigo-200 transition-colors flex items-center gap-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
           >
             <PlusCircle className="w-4 h-4" />
-            Add Invoice
+            New invoice
           </button>
         </div>
       </div>
@@ -165,12 +173,34 @@ export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport }) {
 
       {/* Main Table Container */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {loading ? (
+        {error ? (
+          <div className="p-8 text-center">
+            <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+            <p className="text-sm font-semibold text-gray-900 mt-3">Could not load invoices</p>
+            <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">{error}</p>
+            <p className="text-xs text-gray-400 mt-2">
+              Check that the backend is running on port 8000, then try again.
+            </p>
+            <button
+              onClick={() => loadInvoices()}
+              className="mt-4 bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+            >
+              Try again
+            </button>
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
           </div>
         ) : (
-          <InvoiceList invoices={filteredInvoices} onRefresh={loadInvoices} />
+          <InvoiceList
+            invoices={filteredInvoices}
+            onRefresh={() => loadInvoices({ silent: true })}
+            onNotify={onNotify}
+            onSeeded={handleSeeded}
+            onCreateInvoice={openCreateInvoice}
+            maxTouches={maxTouches}
+          />
         )}
       </div>
 
@@ -178,7 +208,7 @@ export default function InvoicesPage({ onOpenAddInvoice, onOpenBulkImport }) {
       <CreateInvoiceModal
         isOpen={isLocalCreateModalOpen}
         onClose={() => setIsLocalCreateModalOpen(false)}
-        onSuccess={loadInvoices}
+        onSuccess={() => loadInvoices()}
       />
     </div>
   );

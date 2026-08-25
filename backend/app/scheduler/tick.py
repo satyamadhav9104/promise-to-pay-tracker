@@ -1,7 +1,12 @@
 """
 Scheduler tick engine.
-Evaluates all non-closed invoices, enforces stopping rules (cooldown, touch caps, pending verification),
-executes escalation touches, and logs every decision (including no-ops) to ActionLog.
+Evaluates all non-closed invoices, enforces stopping rules (cooldown, touch caps,
+pending verification, active promises), executes escalation touches, and logs every
+decision — including no-ops — to ActionLog.
+
+The stopping rules themselves live in app/core/rules.check_touch_allowed so that the
+manual "send email" button and the promise-rejection nudge obey exactly the same caps
+as this sweep. See docs/requirements.md FR13, FR17, FR18, FR21.
 """
 import uuid
 from datetime import datetime, timezone
@@ -9,12 +14,60 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.rules import next_channel
+from app.core.rules import next_channel, check_touch_allowed
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.promise import Promise, PromiseStatus
 from app.models.action_log import ActionLog
 from app.services.state_machine import transition_invoice_status
 from app.services.notifier import send_notification
+
+
+# Human-readable label for each stopping rule, used as the ActionLog.rule_applied.
+BLOCK_RULE_LABELS = {
+    "invoice_closed": "terminal_state_guard",
+    "pending_verification_pause": "pending_verification_pause",
+    "active_promise_pause": "active_promise_pause",
+    "max_touches_reached": "human_handoff_active",
+    "cooldown_active": "cooldown_enforcement",
+}
+
+
+def _last_log_for(db: Session, invoice_id: str) -> Optional[ActionLog]:
+    """Most recent audit row for an invoice, used to avoid logging the same no-op twice."""
+    return (
+        db.query(ActionLog)
+        .filter(ActionLog.invoice_id == invoice_id)
+        .order_by(ActionLog.timestamp.desc(), ActionLog.id.desc())
+        .first()
+    )
+
+
+def _record_blocked(db: Session, invoice: Invoice, now: datetime, reason: str, detail: str) -> bool:
+    """
+    Writes a blocked-decision audit row, unless the identical decision is already the
+    invoice's most recent entry.
+
+    The sweep runs every 300s, so logging unconditionally would bury the interesting
+    rows under thousands of identical amber ones. Suppressing only *consecutive
+    duplicates* keeps the trail complete — every change of decision is still recorded —
+    while leaving the audit page readable, which is the point of having it.
+    """
+    last = _last_log_for(db, invoice.id)
+    if last is not None and last.action_taken == "no_op" and last.rule_that_blocked == reason:
+        return False
+
+    db.add(ActionLog(
+        id=str(uuid.uuid4()),
+        invoice_id=invoice.id,
+        timestamp=now,
+        trigger="scheduler_tick",
+        action_taken="no_op",
+        rule_applied=BLOCK_RULE_LABELS.get(reason, reason),
+        rule_that_blocked=reason,
+        actor="system",
+        detail=detail,
+    ))
+    return True
 
 
 def run_scheduler_tick(db: Session, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
@@ -27,121 +80,104 @@ def run_scheduler_tick(db: Session, now: Optional[datetime] = None) -> List[Dict
     elif now.tzinfo:
         now = now.replace(tzinfo=None)
 
-
-    # FR13: Structurally exclude paid & written-off invoices from query
+    # FR13: structurally exclude closed invoices. ESCALATED is excluded too — once an
+    # invoice is handed to a human the agent has no further decision to make, so
+    # re-evaluating it every tick would only generate duplicate handoff rows.
     invoices = db.query(Invoice).filter(
-        Invoice.status.notin_([InvoiceStatus.PAID, InvoiceStatus.WRITTEN_OFF])
+        Invoice.status.notin_([
+            InvoiceStatus.PAID,
+            InvoiceStatus.WRITTEN_OFF,
+            InvoiceStatus.ESCALATED,
+        ])
     ).all()
 
-    tick_results = []
+    tick_results: List[Dict[str, Any]] = []
 
     for invoice in invoices:
-        # Check active promises for expiry / broken promises
+        # --- Promise expiry: an approved promise whose date has passed is broken ---
         for promise in invoice.promises:
-            if promise.status == PromiseStatus.ACTIVE and promise.promised_date:
-                if now > promise.promised_date:
-                    promise.status = PromiseStatus.BROKEN
-                    if invoice.status == InvoiceStatus.PROMISE_MADE:
-                        transition_invoice_status(
-                            db, invoice, InvoiceStatus.PROMISE_DUE,
-                            trigger="scheduler_promise_expired",
-                            actor="system",
-                            rule_applied="promise_date_passed",
-                            detail=f"Promise date {promise.promised_date.strftime('%Y-%m-%d')} passed without payment."
-                        )
+            if promise.status != PromiseStatus.ACTIVE or not promise.promised_date:
+                continue
+            promised = promise.promised_date
+            if promised.tzinfo:
+                promised = promised.replace(tzinfo=None)
+            if now <= promised:
+                continue
 
-        # Rule 1: Pending Verification Pause (FR21, FR22)
-        if invoice.status == InvoiceStatus.PENDING_VERIFICATION:
-            log_entry = ActionLog(
-                id=str(uuid.uuid4()),
-                invoice_id=invoice.id,
-                timestamp=now,
-                trigger="scheduler_tick",
-                action_taken="no_op",
-                rule_applied="pending_verification_pause",
-                rule_that_blocked="pending_verification_pause",
-                actor="system",
-                detail="Outbound actions paused while customer payment claim is pending verification."
-            )
-            db.add(log_entry)
-            tick_results.append({
-                "invoice_id": invoice.id,
-                "action": "no_op",
-                "reason": "pending_verification_pause"
-            })
-            continue
+            promise.status = PromiseStatus.BROKEN
 
-        # Rule 2: Hard touch cap check (FR17)
-        if invoice.touch_count >= settings.max_touches_per_invoice:
-            if invoice.status != InvoiceStatus.ESCALATED:
+            if invoice.status == InvoiceStatus.PROMISE_MADE:
+                transition_invoice_status(
+                    db, invoice, InvoiceStatus.PROMISE_DUE,
+                    trigger="scheduler_promise_expired",
+                    actor="system",
+                    rule_applied="promise_date_passed",
+                    detail=f"Promise date {promised.strftime('%Y-%m-%d')} passed without payment."
+                )
+            else:
+                # FR27: every decision is logged, including the ones that don't move
+                # the invoice. Without this branch a promise could silently flip to
+                # broken with no trace, which is exactly the hole the audit trail exists
+                # to close.
+                db.add(ActionLog(
+                    id=str(uuid.uuid4()),
+                    invoice_id=invoice.id,
+                    timestamp=now,
+                    trigger="scheduler_promise_expired",
+                    action_taken="promise_marked_broken",
+                    rule_applied="promise_date_passed",
+                    actor="system",
+                    detail=(
+                        f"Promise date {promised.strftime('%Y-%m-%d')} passed without payment. "
+                        f"Invoice remained in '{invoice.status.value}'."
+                    ),
+                ))
+
+        # --- Stopping rules ---
+        allowed, reason, detail = check_touch_allowed(invoice, now)
+
+        if not allowed:
+            # Hitting the cap is the one blocked outcome that also changes state:
+            # the invoice is handed to a human exactly once.
+            if reason == "max_touches_reached" and invoice.status != InvoiceStatus.ESCALATED:
                 transition_invoice_status(
                     db, invoice, InvoiceStatus.ESCALATED,
                     trigger="scheduler_tick",
                     actor="system",
                     rule_applied="max_touches_reached",
-                    detail=f"Invoice hit maximum touch limit of {settings.max_touches_per_invoice}. Handoff to human review."
+                    detail=(
+                        f"Invoice hit the maximum of {settings.max_touches_per_invoice} touches. "
+                        "Handing off to a human collection agent."
+                    )
                 )
 
-            log_entry = ActionLog(
-                id=str(uuid.uuid4()),
-                invoice_id=invoice.id,
-                timestamp=now,
-                trigger="scheduler_tick",
-                action_taken="no_op",
-                rule_applied="human_handoff_active",
-                rule_that_blocked="max_touches_reached",
-                actor="system",
-                detail=f"Max touches ({settings.max_touches_per_invoice}) reached. Invoice escalated to human collection agent."
-            )
-            db.add(log_entry)
+            _record_blocked(db, invoice, now, reason, detail)
             tick_results.append({
                 "invoice_id": invoice.id,
                 "action": "no_op",
-                "reason": "max_touches_reached"
+                "reason": reason,
+                "detail": detail,
             })
             continue
 
-        # Rule 3: Minimum Cooldown period (FR18)
-        if invoice.last_touch_at:
-            days_since_last = (now - invoice.last_touch_at).total_seconds() / 86400.0
-            if days_since_last < settings.cooldown_days_between_touches:
-                log_entry = ActionLog(
-                    id=str(uuid.uuid4()),
-                    invoice_id=invoice.id,
-                    timestamp=now,
-                    trigger="scheduler_tick",
-                    action_taken="no_op",
-                    rule_applied="cooldown_enforcement",
-                    rule_that_blocked="cooldown_active",
-                    actor="system",
-                    detail=f"Cooldown active ({days_since_last:.1f}/{settings.cooldown_days_between_touches} days elapsed since last touch)."
-                )
-                db.add(log_entry)
-                tick_results.append({
-                    "invoice_id": invoice.id,
-                    "action": "no_op",
-                    "reason": "cooldown_active"
-                })
-                continue
-
-        # If all rules pass: execute next touch in escalation ladder
+        # --- Execute the next touch in the escalation ladder ---
         channel = next_channel(invoice.touch_count)
-        if not channel:
+        if channel is None:
+            # check_touch_allowed already guarantees a channel exists; belt and braces.
             continue
 
-        # Execute simulated touch
         notification_res = send_notification(
             customer_name=invoice.customer_name,
             channel=channel,
             touch_number=invoice.touch_count + 1,
             amount=invoice.amount,
-            due_date_str=invoice.due_date.strftime("%Y-%m-%d")
+            due_date_str=invoice.due_date.strftime("%Y-%m-%d"),
+            recipient_email=getattr(invoice, "customer_email", None),
         )
 
         invoice.touch_count += 1
         invoice.last_touch_at = now
 
-        # Update status if invoice was overdue/created
         if invoice.status in (InvoiceStatus.CREATED, InvoiceStatus.DUE_SOON):
             transition_invoice_status(
                 db, invoice, InvoiceStatus.OVERDUE,
@@ -151,8 +187,7 @@ def run_scheduler_tick(db: Session, now: Optional[datetime] = None) -> List[Dict
                 detail=f"Escalation touch #{invoice.touch_count} sent via {channel.value}."
             )
 
-        # Log executed touch
-        log_entry = ActionLog(
+        db.add(ActionLog(
             id=str(uuid.uuid4()),
             invoice_id=invoice.id,
             timestamp=now,
@@ -161,14 +196,18 @@ def run_scheduler_tick(db: Session, now: Optional[datetime] = None) -> List[Dict
             rule_applied=f"escalation_ladder_step_{invoice.touch_count}",
             rule_that_blocked=None,
             actor="ai",
-            detail=f"Sent touch #{invoice.touch_count} via {channel.value}. Subject/Content: {notification_res.get('subject', notification_res.get('body'))}"
-        )
-        db.add(log_entry)
+            detail=(
+                f"Sent touch #{invoice.touch_count} of {settings.max_touches_per_invoice} "
+                f"via {channel.value}. "
+                f"{notification_res.get('subject', notification_res.get('body', ''))}"
+            ),
+        ))
 
         tick_results.append({
             "invoice_id": invoice.id,
             "action": f"sent_{channel.value}",
-            "touch_number": invoice.touch_count
+            "reason": None,
+            "touch_number": invoice.touch_count,
         })
 
     db.commit()

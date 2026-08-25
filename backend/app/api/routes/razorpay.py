@@ -76,43 +76,66 @@ def api_verify_razorpay_payment(
     db: Session = Depends(get_db)
 ):
     """
-    Verifies Razorpay standard checkout payment signature and closes invoice as PAID.
+    Resolves a Razorpay standard-checkout callback and closes the invoice as PAID.
+
+    The signature is checked when a real key secret is configured; with the mock
+    placeholder there is nothing to check against, so the payment is accepted but the
+    audit row records that no signature was verified.
     """
-    is_valid = verify_razorpay_payment_signature(
+    check = verify_razorpay_payment_signature(
         razorpay_order_id=request.razorpay_order_id,
         razorpay_payment_id=request.razorpay_payment_id,
         razorpay_signature=request.razorpay_signature
     )
 
-    if not is_valid:
-        raise HTTPException(status_code=400, detail="Invalid Razorpay payment signature.")
+    if not check.accept:
+        raise HTTPException(status_code=400, detail=check.detail)
 
     invoice = db.query(Invoice).filter(Invoice.id == request.invoice_id).first()
-    if invoice:
-        if invoice.status != InvoiceStatus.PAID:
-            # Mark active promises as KEPT
-            active_promises = db.query(Promise).filter(
-                Promise.invoice_id == invoice.id,
-                Promise.status == PromiseStatus.ACTIVE
-            ).all()
-            for p in active_promises:
-                p.status = PromiseStatus.KEPT
+    # Previously a missing invoice still returned {"status": "paid"}, so the checkout
+    # sheet showed "Payment captured" for an invoice that was never touched.
+    if not invoice:
+        raise HTTPException(status_code=404, detail=f"Invoice '{request.invoice_id}' not found.")
 
-            transition_invoice_status(
-                db, invoice, InvoiceStatus.PAID,
-                trigger="razorpay_checkout_payment_verified",
-                actor="system",
-                rule_applied="razorpay_live_checkout",
-                detail=f"Razorpay Payment Verified ({request.razorpay_payment_id}). Order: {request.razorpay_order_id}."
+    if invoice.status != InvoiceStatus.PAID:
+        # Mark active promises as KEPT
+        active_promises = db.query(Promise).filter(
+            Promise.invoice_id == invoice.id,
+            Promise.status == PromiseStatus.ACTIVE
+        ).all()
+        for p in active_promises:
+            p.status = PromiseStatus.KEPT
+
+        # The label follows what was actually proven. Writing "Razorpay Payment
+        # Verified" for a simulated checkout would make the audit trail assert a
+        # cryptographic guarantee the server never checked.
+        transition_invoice_status(
+            db, invoice, InvoiceStatus.PAID,
+            trigger=(
+                "razorpay_checkout_payment_verified" if check.verified
+                else "razorpay_checkout_payment_unverified"
+            ),
+            actor="system",
+            rule_applied="razorpay_live_checkout" if check.verified else "razorpay_simulated_checkout",
+            detail=(
+                f"Razorpay checkout payment {request.razorpay_payment_id} "
+                f"(order {request.razorpay_order_id}). {check.detail}"
             )
-            db.commit()
+        )
+        db.commit()
 
     return {
         "success": True,
-        "invoice_id": request.invoice_id,
-        "status": "paid",
+        "invoice_id": invoice.id,
+        "status": invoice.status.value,
         "payment_id": request.razorpay_payment_id,
-        "message": f"Payment {request.razorpay_payment_id} successfully verified. Invoice marked as PAID."
+        "signature_verified": check.verified,
+        "message": (
+            f"Payment {request.razorpay_payment_id} verified. Invoice marked as PAID."
+            if check.verified
+            else f"Payment {request.razorpay_payment_id} accepted from a simulated checkout "
+                 "(signature not verified). Invoice marked as PAID."
+        )
     }
 
 

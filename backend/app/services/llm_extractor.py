@@ -104,9 +104,8 @@ def _heuristic_extractor(reply_text: str) -> PromiseExtractionResult:
     months_pattern = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
     month_match = re.search(rf"({months_pattern}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?|\d{{1,2}}(?:st|nd|rd|th)?\s+{months_pattern}(?:,?\s+\d{{4}})?)", text_lower)
     if month_match:
-        try:
-            from dateutil import parser
-            parsed_dt = parser.parse(month_match.group(1), default=datetime(2026, 8, 23))
+        parsed_dt = _parse_month_phrase(month_match.group(1), now)
+        if parsed_dt:
             return PromiseExtractionResult(
                 is_promise=True,
                 is_payment_claim=False,
@@ -114,8 +113,6 @@ def _heuristic_extractor(reply_text: str) -> PromiseExtractionResult:
                 confidence_score=0.94,
                 reasoning=f"Extracted explicit date commitment: {month_match.group(1)}."
             )
-        except Exception:
-            pass
 
     # Vague commitments (low confidence)
     vague_keywords = ["soon", "working on it", "shortly", "maybe", "trying to arrange", "sometime next month"]
@@ -138,9 +135,48 @@ def _heuristic_extractor(reply_text: str) -> PromiseExtractionResult:
     )
 
 
+def _parse_month_phrase(phrase: str, now: datetime) -> Optional[datetime]:
+    """
+    Parses a natural month phrase ("August 30, 2026", "30 Aug", "by Sep 5") into a datetime.
+
+    Uses python-dateutil when available and falls back to a stdlib strptime sweep so a
+    missing optional dependency can never silently turn a real promise into "no promise
+    detected" on a deployed build.
+    """
+    cleaned = re.sub(r"(\d+)(?:st|nd|rd|th)", r"\1", phrase).replace(",", " ").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+
+    parsed: Optional[datetime] = None
+    try:
+        from dateutil import parser as dateutil_parser
+        parsed = dateutil_parser.parse(cleaned, default=now.replace(hour=0, minute=0, second=0, microsecond=0))
+    except ImportError:
+        for fmt in ("%B %d %Y", "%b %d %Y", "%d %B %Y", "%d %b %Y", "%B %d", "%b %d", "%d %B", "%d %b"):
+            try:
+                candidate = datetime.strptime(cleaned, fmt)
+                parsed = candidate.replace(year=now.year) if "%Y" not in fmt else candidate
+                break
+            except ValueError:
+                continue
+    except Exception:
+        return None
+
+    if parsed is None:
+        return None
+
+    # A month/day with no year that already passed almost certainly means next year.
+    if not re.search(r"\d{4}", cleaned) and parsed.date() < now.date():
+        try:
+            parsed = parsed.replace(year=parsed.year + 1)
+        except ValueError:
+            pass
+
+    return parsed
+
+
 def _extract_with_gemini(reply_text: str) -> Optional[PromiseExtractionResult]:
     """Extracts structured result using Google Gemini REST API."""
-    if not settings.llm_api_key or not settings.llm_api_key.startswith("AIza"):
+    if not settings.llm_api_key:
         return None
 
     models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
@@ -191,10 +227,12 @@ Respond ONLY with valid JSON.
                     confidence_score=float(parsed.get("confidence_score", 0.5)),
                     reasoning=str(parsed.get("reasoning", "Extracted via Google Gemini AI."))
                 )
+            logger.warning("Gemini model %s returned HTTP %s; trying next model.", model_name, res.status_code)
         except Exception as e:
             logger.warning(f"Gemini model {model_name} call note: {e}")
-            break
+            continue
 
+    logger.warning("All Gemini models unavailable — falling back to deterministic extractor.")
     return None
 
 
@@ -206,7 +244,7 @@ def extract_promise_from_reply(reply_text: str) -> PromiseExtractionResult:
     if os.getenv("PYTEST_CURRENT_TEST"):
         return _heuristic_extractor(reply_text)
 
-    if settings.llm_api_key and settings.llm_api_key.startswith("AIza"):
+    if settings.llm_api_key:
         if settings.llm_provider == "gemini":
             result = _extract_with_gemini(reply_text)
             if result:

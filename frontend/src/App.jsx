@@ -12,7 +12,7 @@ import CreateInvoiceModal from './components/CreateInvoiceModal';
 import BulkImportModal from './components/BulkImportModal';
 import AICopilotDrawer from './components/AICopilotDrawer';
 import ToastNotification from './components/ToastNotification';
-import { setUseMockFallback } from './api/client';
+import { setUseMockFallback, fetchSettings } from './api/client';
 
 export default function App({ missingKey = false }) {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -23,15 +23,41 @@ export default function App({ missingKey = false }) {
   const [isAICopilotOpen, setIsAICopilotOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [maxTouches, setMaxTouches] = useState(3);
 
+  const toastTimer = React.useRef(null);
+
+  // One timer, replaced on each call. Without this, two toasts in quick succession
+  // leave two pending timeouts and the first one dismisses the second one early.
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    // Guardrail and failure messages carry more to read than "Saved".
+    const duration = type === 'success' ? 4000 : 7000;
+    toastTimer.current = setTimeout(() => setToast(null), duration);
   };
+
+  React.useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
 
   React.useEffect(() => {
     setUseMockFallback(isDemoMode);
   }, [isDemoMode]);
+
+  // The touch cap is editable on the Settings page, so the invoice table must read
+  // the live value instead of assuming the default. Refetched on `refreshKey` so
+  // saving a new cap updates the column immediately. A failure here is not worth a
+  // toast — the column just keeps the previous value.
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchSettings()
+      .then((s) => {
+        if (!cancelled && s?.max_touches_per_invoice) setMaxTouches(s.max_touches_per_invoice);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [refreshKey, isDemoMode]);
 
   const triggerRefresh = () => setRefreshKey(prev => prev + 1);
 
@@ -143,6 +169,8 @@ export default function App({ missingKey = false }) {
               onOpenAddInvoice={() => setIsGlobalCreateModalOpen(true)}
               onOpenBulkImport={() => setIsBulkImportOpen(true)}
               onOpenAICopilot={() => setIsAICopilotOpen(true)}
+              onNotify={showToast}
+              maxTouches={maxTouches}
             />
           )}
           {activeTab === 'invoices' && (
@@ -150,6 +178,8 @@ export default function App({ missingKey = false }) {
               key={refreshKey}
               onOpenAddInvoice={() => setIsGlobalCreateModalOpen(true)}
               onOpenBulkImport={() => setIsBulkImportOpen(true)}
+              onNotify={showToast}
+              maxTouches={maxTouches}
             />
           )}
           {activeTab === 'audit' && <AuditPage key={refreshKey} />}

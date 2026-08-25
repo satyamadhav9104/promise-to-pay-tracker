@@ -1,4 +1,10 @@
-import { MOCK_INVOICES, MOCK_METRICS } from '../utils/mockData';
+import {
+  MOCK_INVOICES,
+  MOCK_METRICS,
+  MOCK_AUDIT_LOGS,
+  MOCK_SETTINGS,
+  MOCK_TICK_RESULT
+} from '../utils/mockData';
 
 const API_BASE = '/api';
 
@@ -11,6 +17,10 @@ export function setClerkTokenGetter(getter) {
 
 export function setUseMockFallback(val) {
   useMockFallback = val;
+}
+
+export function isDemoMode() {
+  return useMockFallback;
 }
 
 async function getAuthHeaders(extraHeaders = {}) {
@@ -32,120 +42,154 @@ async function getAuthHeaders(extraHeaders = {}) {
   return headers;
 }
 
+/**
+ * Throws an Error carrying the server's message when a response is not ok.
+ * Callers are expected to surface this to the user — we deliberately do not
+ * disguise a failing backend as an empty-but-healthy app.
+ */
+async function assertOk(res, fallbackMessage) {
+  if (res.ok) return res;
+  let detail = '';
+  try {
+    const body = await res.json();
+    detail = body.detail || body.message || '';
+  } catch (e) {
+    detail = '';
+  }
+  throw new Error(detail || `${fallbackMessage} (HTTP ${res.status})`);
+}
+
 export async function fetchInvoices(statusFilter = '') {
-  // Use 50 mock invoices ONLY when in explicit Demo Mode
+  // Use mock invoices ONLY when in explicit Demo Mode
   if (useMockFallback) {
-    return statusFilter 
+    return statusFilter
       ? MOCK_INVOICES.filter(i => i.status === statusFilter)
       : MOCK_INVOICES;
   }
 
-  try {
-    const url = statusFilter ? `${API_BASE}/invoices?status=${statusFilter}` : `${API_BASE}/invoices`;
-    const headers = await getAuthHeaders();
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error('Failed to fetch invoices from backend');
-    const data = await res.json();
-    return data || [];
-  } catch (err) {
-    return [];
-  }
+  const url = statusFilter ? `${API_BASE}/invoices?status=${statusFilter}` : `${API_BASE}/invoices`;
+  const headers = await getAuthHeaders();
+  const res = await fetch(url, { headers });
+  await assertOk(res, 'Could not load invoices');
+  const data = await res.json();
+  return data || [];
 }
 
 export async function fetchMetrics() {
-  try {
-    const headers = await getAuthHeaders();
-    const res = await fetch(`${API_BASE}/invoices/metrics/summary`, { headers });
-    if (!res.ok) throw new Error('Failed to fetch metrics from backend');
-    return res.json();
-  } catch (err) {
-    if (useMockFallback) {
-      return MOCK_METRICS;
-    }
-    return {
-      total_invoices_count: 0,
-      total_receivables_amount: 0,
-      total_recovered_amount: 0,
-      recovery_rate_percentage: 0,
-      active_promises_count: 0,
-      overdue_invoices_count: 0,
-      escalated_invoices_count: 0
-    };
+  if (useMockFallback) {
+    return MOCK_METRICS;
   }
+
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/invoices/metrics/summary`, { headers });
+  await assertOk(res, 'Could not load metrics');
+  return res.json();
 }
 
 export async function fetchAuditLogs(invoiceId = '') {
-  try {
-    const url = invoiceId ? `${API_BASE}/audit?invoice_id=${invoiceId}` : `${API_BASE}/audit`;
-    const headers = await getAuthHeaders();
-    const res = await fetch(url, { headers });
-    if (!res.ok) throw new Error('Failed to fetch audit logs');
-    return res.json();
-  } catch (err) {
-    if (useMockFallback && invoiceId) {
-      const found = MOCK_INVOICES.find(i => i.id === invoiceId || i.invoice_number === invoiceId);
-      return found ? found.audit_trail : [];
-    }
-    return [];
+  if (useMockFallback) {
+    return invoiceId
+      ? MOCK_AUDIT_LOGS.filter(l => l.invoice_id === invoiceId)
+      : MOCK_AUDIT_LOGS;
   }
+
+  const url = invoiceId ? `${API_BASE}/audit?invoice_id=${invoiceId}` : `${API_BASE}/audit`;
+  const headers = await getAuthHeaders();
+  const res = await fetch(url, { headers });
+  await assertOk(res, 'Could not load the audit trail');
+  return res.json();
 }
 
 export async function triggerSchedulerTick() {
-  try {
-    const headers = await getAuthHeaders();
-    const res = await fetch(`${API_BASE}/scheduler/tick`, { method: 'POST', headers });
-    if (!res.ok) throw new Error('Failed to trigger scheduler tick');
-    return res.json();
-  } catch (err) {
+  if (useMockFallback) {
+    return MOCK_TICK_RESULT;
+  }
+
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/scheduler/tick`, { method: 'POST', headers });
+  await assertOk(res, 'Recovery sweep could not run');
+  return res.json();
+}
+
+export async function fetchSettings() {
+  if (useMockFallback) {
+    return { ...MOCK_SETTINGS };
+  }
+
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/settings`, { headers });
+  await assertOk(res, 'Could not load guardrail settings');
+  return res.json();
+}
+
+export async function updateSettings(patch) {
+  if (useMockFallback) {
+    Object.assign(MOCK_SETTINGS, patch);
+    return { ...MOCK_SETTINGS };
+  }
+
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/settings`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(patch)
+  });
+  await assertOk(res, 'Could not save guardrail settings');
+  return res.json();
+}
+
+export async function seedDemoData() {
+  if (useMockFallback) {
     return {
       success: true,
-      processed_count: 0,
-      nudge_count: 0,
-      escalated_count: 0,
-      timestamp: new Date().toISOString()
+      invoices_created: MOCK_INVOICES.length,
+      message: 'Demo mode is already showing sample invoices.'
     };
   }
+
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/demo/seed`, { method: 'POST', headers });
+  await assertOk(res, 'Could not load demo data');
+  return res.json();
 }
 
 export async function submitCustomerReply(invoiceId, replyText) {
-  try {
+  if (!useMockFallback) {
     const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API_BASE}/promises/extract`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ invoice_id: invoiceId, reply_text: replyText })
     });
-    if (!res.ok) throw new Error('Failed to process customer reply');
+    await assertOk(res, 'Could not read that reply');
     return res.json();
-  } catch (err) {
-    if (useMockFallback) {
-      const found = MOCK_INVOICES.find(i => i.id === invoiceId || i.invoice_number === invoiceId);
-      if (found) {
-        found.extracted_text = replyText;
-        const promiseId = 'promise_' + Math.random().toString(36).substring(7);
-        const dateMatch = replyText.match(/\d{4}-\d{2}-\d{2}/);
-        let extractedDate = '2026-08-23';
-        if (dateMatch) extractedDate = dateMatch[0];
-        
-        if (!found.promises) found.promises = [];
-        found.promises.unshift({
-          id: promiseId,
-          invoice_id: invoiceId,
-          promised_date: extractedDate,
-          confidence_score: 0.95,
-          source_text: replyText,
-          status: 'active'
-        });
-        return {
-          invoice_id: invoiceId,
-          status: found.status,
-          promise: { id: promiseId, promised_date: extractedDate },
-          message: 'Reply processed for existing invoice ' + invoiceId
-        };
-      }
-    }
-    throw err;
   }
+
+  const found = MOCK_INVOICES.find(i => i.id === invoiceId || i.invoice_number === invoiceId);
+  if (!found) throw new Error(`Invoice ${invoiceId} is not in the demo data set.`);
+
+  found.extracted_text = replyText;
+  const promiseId = 'promise_' + Math.random().toString(36).substring(7);
+  const dateMatch = replyText.match(/\d{4}-\d{2}-\d{2}/);
+  const extractedDate = dateMatch ? dateMatch[0] : '2026-09-01';
+  const confidence = dateMatch ? 0.94 : 0.55;
+
+  if (!found.promises) found.promises = [];
+  found.promises.unshift({
+    id: promiseId,
+    invoice_id: invoiceId,
+    promised_date: extractedDate,
+    confidence_score: confidence,
+    source_text: replyText,
+    status: confidence >= MOCK_SETTINGS.promise_confidence_threshold ? 'active' : 'flagged_human_review'
+  });
+  return {
+    invoice_id: invoiceId,
+    status: found.status,
+    auto_accepted: confidence >= MOCK_SETTINGS.promise_confidence_threshold,
+    promise: { id: promiseId, promised_date: extractedDate, confidence_score: confidence },
+    message: `Reply read for ${invoiceId} (demo mode).`
+  };
 }
 
 export async function createRazorpayOrder(invoiceId, amount) {
@@ -172,22 +216,14 @@ export async function createRazorpayOrder(invoiceId, amount) {
 }
 
 export async function verifyRazorpayPayment(paymentData) {
-  try {
-    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
-    const res = await fetch(`${API_BASE}/razorpay/verify-payment`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(paymentData)
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.detail || 'Payment signature verification failed');
-    }
-    return res.json();
-  } catch (err) {
-    console.warn('verifyRazorpayPayment error, using fallback:', err);
-    return simulatePayment(paymentData.invoice_id);
-  }
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/razorpay/verify-payment`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(paymentData)
+  });
+  await assertOk(res, 'Payment could not be verified');
+  return res.json();
 }
 
 export async function openRazorpayCheckout(invoice, onSuccess, onError) {
@@ -251,173 +287,161 @@ export async function openRazorpayCheckout(invoice, onSuccess, onError) {
 }
 
 export async function simulatePayment(invoiceId) {
-  try {
-    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
-    const res = await fetch(`${API_BASE}/webhooks/simulate-payment`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ invoice_id: invoiceId })
-    });
-    if (!res.ok) throw new Error('Failed to simulate payment');
-    return res.json();
-  } catch (err) {
+  if (useMockFallback) {
+    const found = MOCK_INVOICES.find(i => i.id === invoiceId || i.invoice_number === invoiceId);
+    if (found) found.status = 'paid';
     return {
       status: 'paid',
-      payment_ref: 'pay_simulated_' + Math.random().toString(36).substring(7),
-      message: 'Payment simulation successful. Invoice status set to PAID.'
+      payment_ref: 'pay_demo_' + Math.random().toString(36).substring(7),
+      message: `${invoiceId} marked as paid in demo data.`
     };
   }
+
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/webhooks/simulate-payment`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ invoice_id: invoiceId })
+  });
+  await assertOk(res, 'Could not record that payment');
+  return res.json();
 }
 
 export async function createInvoice(invoiceData) {
-  try {
-    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
-    const payload = {
-      ...invoiceData,
-      user_id: window.Clerk?.user?.id || invoiceData.user_id
+  if (useMockFallback) {
+    const newId = invoiceData.id || `INV-${1053 + Math.floor(Math.random() * 900)}`;
+    const newInv = {
+      id: newId,
+      invoice_number: newId,
+      customer_name: invoiceData.customer_name || 'New client',
+      client_name: invoiceData.customer_name || 'New client',
+      customer_email: invoiceData.customer_email || 'client@example.com',
+      invoice_type: invoiceData.invoice_type || 'receivable',
+      amount: parseFloat(invoiceData.amount || 0),
+      status: 'created',
+      due_date: invoiceData.due_date ? invoiceData.due_date.split('T')[0] : new Date().toISOString().split('T')[0],
+      touch_count: 0,
+      extracted_text: null,
+      promises: []
     };
-    const res = await fetch(`${API_BASE}/invoices`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload)
+    MOCK_INVOICES.unshift(newInv);
+    MOCK_AUDIT_LOGS.unshift({
+      id: `log_${newId}_created`,
+      invoice_id: newId,
+      timestamp: new Date().toISOString(),
+      trigger: 'user_action',
+      action_taken: 'invoice_created',
+      rule_applied: 'initial_ingestion',
+      rule_that_blocked: null,
+      actor: 'user',
+      detail: `Created invoice ${newId} for ${newInv.customer_name}.`
     });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to create invoice');
-    }
-    return res.json();
-  } catch (err) {
-    if (useMockFallback) {
-      const newInv = {
-        id: invoiceData.id || `INV-2026-${Math.floor(100 + Math.random() * 900)}`,
-        invoice_number: invoiceData.id || `INV-2026-${Math.floor(100 + Math.random() * 900)}`,
-        client_name: invoiceData.customer_name || 'New Client',
-        customer_email: invoiceData.customer_email || 'client@example.com',
-        amount: parseFloat(invoiceData.amount || 0),
-        status: 'overdue',
-        due_date: invoiceData.due_date ? invoiceData.due_date.split('T')[0] : new Date().toISOString().split('T')[0],
-        promised_pay_date: null,
-        promise_confidence: null,
-        touch_count: 0,
-        extracted_text: null,
-        audit_trail: [
-          { action: 'Invoice Created', timestamp: new Date().toISOString(), details: 'Manual invoice entry.' }
-        ]
-      };
-      MOCK_INVOICES.unshift(newInv);
-      return newInv;
-    }
-    throw err;
+    return newInv;
   }
+
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const payload = {
+    ...invoiceData,
+    user_id: window.Clerk?.user?.id || invoiceData.user_id
+  };
+  const res = await fetch(`${API_BASE}/invoices`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload)
+  });
+  await assertOk(res, 'Could not create the invoice');
+  return res.json();
 }
 
 export async function deleteInvoice(invoiceId) {
-  try {
-    const headers = await getAuthHeaders();
-    const res = await fetch(`${API_BASE}/invoices/${invoiceId}`, {
-      method: 'DELETE',
-      headers
-    });
-    if (!res.ok) throw new Error('Failed to delete invoice');
-    return res.json();
-  } catch (err) {
-    if (useMockFallback) {
-      const idx = MOCK_INVOICES.findIndex(i => i.id === invoiceId || i.invoice_number === invoiceId);
-      if (idx !== -1) MOCK_INVOICES.splice(idx, 1);
-      return { message: 'Deleted from mock data' };
-    }
-    throw err;
+  if (useMockFallback) {
+    const idx = MOCK_INVOICES.findIndex(i => i.id === invoiceId || i.invoice_number === invoiceId);
+    if (idx !== -1) MOCK_INVOICES.splice(idx, 1);
+    return { message: `${invoiceId} removed from the demo data set.` };
   }
+
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/invoices/${invoiceId}`, {
+    method: 'DELETE',
+    headers
+  });
+  await assertOk(res, 'Could not delete the invoice');
+  return res.json();
 }
 
 export async function sendInvoiceEmail(invoiceId) {
-  try {
-    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
-    const res = await fetch(`${API_BASE}/invoices/${invoiceId}/send-email`, {
-      method: 'POST',
-      headers
-    });
-    if (!res.ok) throw new Error('Failed to send invoice email');
-    return res.json();
-  } catch (err) {
+  if (useMockFallback) {
+    const found = MOCK_INVOICES.find(i => i.id === invoiceId || i.invoice_number === invoiceId);
+    if (found) found.touch_count = (found.touch_count || 0) + 1;
     return {
-      message: `Automated email dispatched to customer!`,
-      recipient: 'customer@example.com',
-      touch_count: 1
+      message: `Reminder email queued for ${invoiceId} (demo mode).`,
+      touch_count: found?.touch_count || 1
     };
   }
+
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/invoices/${invoiceId}/send-email`, {
+    method: 'POST',
+    headers
+  });
+  await assertOk(res, 'Could not send the reminder email');
+  return res.json();
 }
 
 export async function approvePromise(promiseId) {
-  try {
-    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
-    const res = await fetch(`${API_BASE}/promises/${promiseId}/approve`, {
-      method: 'POST',
-      headers
-    });
-    if (!res.ok) throw new Error('Failed to approve promise');
-    return res.json();
-  } catch (err) {
-    if (useMockFallback) {
-      const found = MOCK_INVOICES.find(i => 
-        i.id === promiseId || 
-        i.invoice_number === promiseId || 
-        i.promises?.some(p => p.id === promiseId)
-      );
-      if (found) {
-        found.status = 'promise_made';
-        if (found.promises && found.promises.length > 0) {
-          found.promises[0].status = 'active';
-          if (found.promises[0].promised_date) {
-            found.due_date = found.promises[0].promised_date;
-          }
+  if (useMockFallback) {
+    const found = MOCK_INVOICES.find(i =>
+      i.id === promiseId ||
+      i.invoice_number === promiseId ||
+      i.promises?.some(p => p.id === promiseId)
+    );
+    if (found) {
+      found.status = 'promise_made';
+      if (found.promises && found.promises.length > 0) {
+        found.promises[0].status = 'active';
+        if (found.promises[0].promised_date) {
+          found.due_date = found.promises[0].promised_date;
         }
-        delete found.extracted_text;
-        found.audit_trail = found.audit_trail || [];
-        found.audit_trail.unshift({
-          action: 'Promise Approved',
-          timestamp: new Date().toISOString(),
-          details: 'Admin approved customer payment commitment date.'
-        });
       }
+      delete found.extracted_text;
     }
-    return { success: true, message: 'Payment promise approved! Due date updated to committed date.' };
+    return { success: true, message: 'Promise approved. Due date moved to the promised date.' };
   }
+
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/promises/${promiseId}/approve`, {
+    method: 'POST',
+    headers
+  });
+  await assertOk(res, 'Could not approve the promise');
+  return res.json();
 }
 
 export async function rejectPromise(promiseId) {
-  try {
-    const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
-    const res = await fetch(`${API_BASE}/promises/${promiseId}/reject`, {
-      method: 'POST',
-      headers
-    });
-    if (!res.ok) throw new Error('Failed to reject promise');
-    return res.json();
-  } catch (err) {
-    if (useMockFallback) {
-      const found = MOCK_INVOICES.find(i => 
-        i.id === promiseId || 
-        i.invoice_number === promiseId || 
-        i.promises?.some(p => p.id === promiseId)
-      );
-      if (found) {
-        found.status = 'escalated';
-        found.touch_count = (found.touch_count || 0) + 1;
-        if (found.promises && found.promises.length > 0) {
-          found.promises[0].status = 'broken';
-        }
-        delete found.extracted_text;
-        found.audit_trail = found.audit_trail || [];
-        found.audit_trail.unshift({
-          action: 'Promise Rejected & Reminder Sent',
-          timestamp: new Date().toISOString(),
-          details: 'Admin rejected payment date. Automated Pay Now reminder dispatched with Razorpay link.'
-        });
+  if (useMockFallback) {
+    const found = MOCK_INVOICES.find(i =>
+      i.id === promiseId ||
+      i.invoice_number === promiseId ||
+      i.promises?.some(p => p.id === promiseId)
+    );
+    if (found) {
+      found.status = 'escalated';
+      found.touch_count = (found.touch_count || 0) + 1;
+      if (found.promises && found.promises.length > 0) {
+        found.promises[0].status = 'broken';
       }
+      delete found.extracted_text;
     }
-    return { success: true, message: 'Promise rejected! Invoice escalated and payment reminder email sent with Razorpay link.' };
+    return { success: true, message: 'Promise rejected. Invoice escalated for a reminder.' };
   }
+
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API_BASE}/promises/${promiseId}/reject`, {
+    method: 'POST',
+    headers
+  });
+  await assertOk(res, 'Could not reject the promise');
+  return res.json();
 }
 
 // RAG API Functions

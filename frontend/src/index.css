@@ -45,3 +45,63 @@ body {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/*
+ * Utilities the components use that Tailwind v3 does not generate.
+ *
+ * `shadow-xs` and `backdrop-blur-xs` are Tailwind *v4* names; this project is on
+ * v3, where the equivalents are `shadow-sm` and `backdrop-blur-sm`. The
+ * `slide-in-*`/`zoom-in-*`/`fade-in` names come from tailwindcss-animate, which
+ * is not a dependency. All of them silently did nothing when the CDN build was
+ * in use, so they are defined here rather than removed from the markup — that
+ * keeps the diff small and the animations actually work now.
+ */
+.shadow-xs {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.backdrop-blur-xs {
+  backdrop-filter: blur(2px);
+}
+
+/* Hides the scrollbar on horizontally scrolling chip rows, without disabling scroll. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Directional entrances. `animate-in` above supplies the timing. */
+.fade-in { animation-name: fadeIn; }
+
+.slide-in-from-bottom-5 { animation-name: slideInFromBottom; }
+.slide-in-from-right { animation-name: slideInFromRight; }
+.zoom-in-95 { animation-name: zoomIn95; }
+
+@keyframes slideInFromBottom {
+  from { opacity: 0; transform: translateY(1.25rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInFromRight {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes zoomIn95 {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Honour a reduced-motion preference rather than animating regardless. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .fade-in,
+  .slide-in-from-bottom-5,
+  .slide-in-from-right,
+  .zoom-in-95 {
+    animation: none;
+  }
+}

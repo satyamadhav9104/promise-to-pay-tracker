@@ -175,16 +175,6 @@ promise-to-pay-tracker/
 └── README.md
 ```
 
-## Commit history
-
-A clean, traceable commit history representing small, atomic features and fixes:
-- `feat(core)`: deterministic state machine and invariant enforcement
-- `feat(llm)`: Gemini 2.5 promise extractor with structured Pydantic fallback
-- `feat(rules)`: bounded stopping rules (3-touch cap, 4-day cooldown, claim pause)
-- `feat(webhook)`: HMAC-SHA256 Razorpay webhook settlement receiver
-- `fix(concurrency)`: pending verification pause and test harness thread isolation
-- `feat(ui)`: React dashboard, HITL review card, and plain-language audit trail
-
 ## License
 
 Developed for the **Razorpay AI Buildathon 2026 (Track 03: AI Revenue Recovery)**.

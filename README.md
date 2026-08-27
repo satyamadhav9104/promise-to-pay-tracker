@@ -7,6 +7,24 @@
 
 ---
 
+## Table of Contents
+- [Why this exists](#why-this-exists)
+- [What it does](#what-it-does)
+- [Demo](#demo)
+- [Architecture](#architecture)
+- [The bar this project is built to](#the-bar-this-project-is-built-to)
+- [What broke, and how it got fixed](#what-broke-and-how-it-got-fixed-failurerecovery-story)
+- [How to setup / Getting started](#how-to-setup--getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Step-by-Step Installation](#step-by-step-installation)
+  - [Environment Variables](#environment-variables)
+  - [Running the Recovery Batch & Tests](#running-the-recovery-batch--tests)
+- [Results](#results)
+- [Project structure](#project-structure)
+- [License](#license)
+
+---
+
 ## Why this exists
 
 Revenue rarely dies in one dramatic event — it leaks out through overdue B2B invoices, ignored follow-ups, and promises-to-pay that nobody tracks. SMARTINVOICE closes that loop end-to-end: it detects at-risk invoices, diagnoses why they're stuck, decides the right intervention, and executes a **bounded** recovery workflow — with hard stopping rules so the agent can never escalate on its own past what a human has authorized.
@@ -83,34 +101,62 @@ This is the highest-weighted part of the rubric — don't bury it, don't sanitiz
 >
 > **What it taught me:** Webhook-driven event listeners and periodic poll-driven schedulers are concurrent actors from day one. In financial recovery workflows, optimistic state changes without intermediate verification locks always create customer friction or phantom revenue leaks.
 
-## Getting started
+## How to setup / Getting started
 
 ### Prerequisites
-- Python 3.10+ (Python 3.12 recommended)
-- Node.js 18+ & npm 9+
-- Razorpay test-mode API keys ([Razorpay Dashboard](https://dashboard.razorpay.com))
-- Google Gemini API Key ([Google AI Studio](https://aistudio.google.com))
+- **Python**: 3.10+ (Python 3.12 recommended)
+- **Node.js**: 18.0+ & **npm**: 9.0+
+- **Razorpay test-mode API keys** ([Razorpay Dashboard](https://dashboard.razorpay.com))
+- **Google Gemini API Key** ([Google AI Studio](https://aistudio.google.com))
 
-### Setup
+### Step-by-Step Installation
+
+#### 1. Clone the repository
 ```bash
 git clone https://github.com/satyamadhav9104/promise-to-pay-tracker.git
 cd promise-to-pay-tracker
-
-# backend
-cd backend
-python -m venv venv
-# Windows: .\venv\Scripts\Activate.ps1 | macOS/Linux: source venv/bin/activate
-pip install -r requirements.txt
-python scripts/seed_invoices.py
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-
-# frontend (in a new terminal)
-cd ../frontend
-npm install
-npm run dev
 ```
 
+#### 2. Setup Backend (FastAPI Engine)
+```bash
+cd backend
+
+# Create and activate Python virtual environment
+# Windows:
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# macOS / Linux:
+# python3 -m venv venv && source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Seed the database with 52 synthetic enterprise B2B invoices
+python scripts/seed_invoices.py
+
+# Start the FastAPI server
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+- API Base URL: `http://127.0.0.1:8000`
+- Interactive Swagger Docs: `http://127.0.0.1:8000/docs`
+
+#### 3. Setup Frontend (React 18 + Vite)
+In a **new terminal tab**:
+```bash
+cd promise-to-pay-tracker/frontend
+
+# Install dependencies
+npm install
+
+# Start the Vite development server
+npm run dev
+```
+- Frontend Dashboard: `http://localhost:3000` (or `http://localhost:5173`)
+
 ### Environment variables
+All variables have sensible out-of-the-box defaults for local development (no mandatory `.env` required):
+
 | Variable | Description | Default / Example |
 |---|---|---|
 | `RAZORPAY_KEY_ID` | Razorpay test-mode key | `rzp_test_TSRi5elb8AdVBV` |
@@ -121,12 +167,12 @@ npm run dev
 | `MAX_TOUCHES_PER_INVOICE` | Hard ceiling for automated reminders | `3` |
 | `COOLDOWN_DAYS_BETWEEN_TOUCHES` | Cooldown period between touches | `4` |
 
-### Running the recovery batch
+### Running the Recovery Batch & Tests
 ```bash
-# Execute scheduler sweep across all active invoices
+# Trigger an automated recovery evaluation sweep across all active invoices
 curl -X POST http://127.0.0.1:8000/api/scheduler/tick
 
-# Or run the complete automated test suite (27 passed)
+# Run the complete test suite (27 unit & integration tests)
 cd backend
 python -m pytest -v
 ```

@@ -5,6 +5,8 @@
 **Track:** 03 — AI Revenue Recovery · Razorpay AI Buildathon 2026  
 **Live demo:** [smartinvoice-recovery-ai.herokuapp.com](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com) · **API Docs:** [Interactive Swagger Docs (/docs)](https://smartinvoice-recovery-ai-dd8c39748dc8.herokuapp.com/docs) · **Architecture doc:** [docs/Architecture.md](docs/Architecture.md)
 
+Demo video = https://youtu.be/uKUmEUarEII
+
 ---
 
 ## Table of Contents
